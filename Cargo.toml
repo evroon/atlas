@@ -1,0 +1,20 @@
+[package]
+name = "atlas"
+version = "0.1.0"
+edition = "2021"
+authors = ["Erik Vroon"]
+publish = false
+
+[dependencies]
+vulkano = "0.29.0"
+vulkano-shaders = "0.29.0"
+vulkano-win = "0.29.0"
+winit = "0.26"
+bytemuck = { version = "1.7", features = ["derive", "extern_crate_std", "min_const_generics"] }
+cgmath = "0.18"
+png = "0.17"
+serde = { version = "1.0", features = ["derive"] }
+ron = "0.7"
+rand = "0.8.4"
+
+glium = { git = "https://github.com/glium/glium.git", rev = "60889a2" }
