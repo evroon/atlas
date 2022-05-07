@@ -1,0 +1,227 @@
+use std::{sync::Arc};
+// use imgui::{Context, FontSource, FontConfig, FontGlyphRanges};
+// use imgui_winit_support::{HiDpiMode, WinitPlatform};
+use vulkano::{
+    device::{
+        physical::{PhysicalDevice, PhysicalDeviceType},
+        Device, DeviceCreateInfo, DeviceExtensions, QueueCreateInfo, Queue,
+    },
+    format::Format,
+    image::{view::ImageView, AttachmentImage, ImageAccess, ImageUsage, SwapchainImage},
+    instance::{Instance, InstanceCreateInfo},
+    swapchain::{
+        Swapchain, SwapchainCreateInfo, Surface,
+    }, shader::ShaderModule, render_pass::{RenderPass, Framebuffer, FramebufferCreateInfo, Subpass}, pipeline::{GraphicsPipeline, graphics::{vertex_input::{BuffersDefinition}, depth_stencil::DepthStencilState, viewport::{ViewportState, Viewport}, input_assembly::InputAssemblyState}},
+};
+
+use vulkano_win::VkSurfaceBuild;
+use winit::{
+    event_loop::{EventLoop},
+    window::{Window, WindowBuilder},
+};
+
+// use crate::atlas_core::imgui_wrapper::Renderer;
+
+use self::mesh::{Vertex, Normal};
+
+pub mod mesh;
+// pub mod imgui_wrapper;
+// mod clipboard;
+
+pub struct System {
+    pub event_loop: EventLoop<()>,
+    pub device : Arc<Device>,
+    pub swapchain : Arc<Swapchain<Window>>,
+    pub images : Vec<Arc<SwapchainImage<Window>>>,
+    pub surface : Arc<Surface<Window>>,
+    pub queue: Arc<Queue>
+}
+
+pub fn init(title: &str) -> System {
+    let required_extensions = vulkano_win::required_extensions();
+    let instance = Instance::new(InstanceCreateInfo {
+        enabled_extensions: required_extensions,
+        ..Default::default()
+    })
+    .unwrap();
+    
+    let event_loop = EventLoop::new();
+    let surface = WindowBuilder::new()
+        .with_title(title)
+        .build_vk_surface(&event_loop, instance.clone())
+        .expect("Failed to create a window");
+
+
+    let device_extensions = DeviceExtensions {
+        khr_swapchain: true,
+        ..DeviceExtensions::none()
+    };
+    let (physical_device, queue_family) = PhysicalDevice::enumerate(&instance)
+        .filter(|&p| p.supported_extensions().is_superset_of(&device_extensions))
+        .filter_map(|p| {
+            p.queue_families()
+                .find(|&q| q.supports_graphics() && q.supports_surface(&surface).unwrap_or(false))
+                .map(|q| (p, q))
+        })
+        .min_by_key(|(p, _)| match p.properties().device_type {
+            PhysicalDeviceType::DiscreteGpu => 0,
+            PhysicalDeviceType::IntegratedGpu => 1,
+            PhysicalDeviceType::VirtualGpu => 2,
+            PhysicalDeviceType::Cpu => 3,
+            PhysicalDeviceType::Other => 4,
+        })
+        .unwrap();
+
+    println!(
+        "Using device: {} (type: {:?})",
+        physical_device.properties().device_name,
+        physical_device.properties().device_type,
+    );
+
+    let (device, mut queues) = Device::new(
+        physical_device,
+        DeviceCreateInfo {
+            enabled_extensions: physical_device
+                .required_extensions()
+                .union(&device_extensions),
+            queue_create_infos: vec![QueueCreateInfo::family(queue_family)],
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    let queue = queues.next().unwrap();
+
+    let (swapchain, images) = {
+        let surface_capabilities = physical_device
+            .surface_capabilities(&surface, Default::default())
+            .unwrap();
+        let image_format = Some(
+            physical_device
+                .surface_formats(&surface, Default::default())
+                .unwrap()[0]
+                .0,
+        );
+
+        Swapchain::new(
+            device.clone(),
+            surface.clone(),
+            SwapchainCreateInfo {
+                min_image_count: surface_capabilities.min_image_count,
+                image_format,
+                image_extent: surface.window().inner_size().into(),
+                image_usage: ImageUsage::color_attachment(),
+                composite_alpha: surface_capabilities
+                    .supported_composite_alpha
+                    .iter()
+                    .next()
+                    .unwrap(),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+    };
+
+    // let mut imgui = Context::create();
+    // imgui.set_ini_filename(None);
+
+    // if let Some(backend) = clipboard::init() {
+    //     imgui.set_clipboard_backend(Box::new(backend));
+    // } else {
+    //     eprintln!("Failed to initialize clipboard");
+    // }
+
+    // let mut platform = WinitPlatform::init(&mut imgui);
+    // platform.attach_window(imgui.io_mut(), &surface.window(), HiDpiMode::Rounded);
+
+    // let hidpi_factor = platform.hidpi_factor();
+    // let font_size = (13.0 * hidpi_factor) as f32;
+    // imgui.fonts().add_font(&[
+    //     FontSource::DefaultFontData {
+    //         config: Some(FontConfig {
+    //             size_pixels: font_size,
+    //             ..FontConfig::default()
+    //         }),
+    //     },
+    //     FontSource::TtfData {
+    //         data: include_bytes!("../../assets/fonts/mplus-1p-regular.ttf"),
+    //         size_pixels: font_size,
+    //         config: Some(FontConfig {
+    //             rasterizer_multiply: 1.75,
+    //             glyph_ranges: FontGlyphRanges::japanese(),
+    //             ..FontConfig::default()
+    //         }),
+    //     },
+    // ]);
+
+    // imgui.io_mut().font_global_scale = (1.0 / hidpi_factor) as f32;
+
+    // let renderer = Renderer::init(&mut imgui, device.clone(), queue.clone(), format).expect("Failed to initialize renderer");
+    
+    System {
+        event_loop,
+        device,
+        swapchain,
+        images,
+        surface,
+        queue,
+    }
+}
+
+/// This method is called once during initialization, then again whenever the window is resized
+pub fn window_size_dependent_setup(
+    device: Arc<Device>,
+    vs: &ShaderModule,
+    fs: &ShaderModule,
+    images: &[Arc<SwapchainImage<Window>>],
+    render_pass: Arc<RenderPass>,
+) -> (Arc<GraphicsPipeline>, Vec<Arc<Framebuffer>>) {
+    let dimensions = images[0].dimensions().width_height();
+
+    let depth_buffer = ImageView::new_default(
+        AttachmentImage::transient(device.clone(), dimensions, Format::D16_UNORM).unwrap(),
+    )
+    .unwrap();
+
+    let framebuffers = images
+        .iter()
+        .map(|image| {
+            let view = ImageView::new_default(image.clone()).unwrap();
+            Framebuffer::new(
+                render_pass.clone(),
+                FramebufferCreateInfo {
+                    attachments: vec![view, depth_buffer.clone()],
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+        })
+        .collect::<Vec<_>>();
+
+    // In the triangle example we use a dynamic viewport, as its a simple example.
+    // However in the teapot example, we recreate the pipelines with a hardcoded viewport instead.
+    // This allows the driver to optimize things, at the cost of slower window resizes.
+    // https://computergraphics.stackexchange.com/questions/5742/vulkan-best-way-of-updating-pipeline-viewport
+    let pipeline = GraphicsPipeline::start()
+        .vertex_input_state(
+            BuffersDefinition::new()
+                .vertex::<Vertex>()
+                .vertex::<Normal>(),
+        )
+        .vertex_shader(vs.entry_point("main").unwrap(), ())
+        .input_assembly_state(InputAssemblyState::new())
+        .viewport_state(ViewportState::viewport_fixed_scissor_irrelevant([
+            Viewport {
+                origin: [0.0, 0.0],
+                dimensions: [dimensions[0] as f32, dimensions[1] as f32],
+                depth_range: 0.0..1.0,
+            },
+        ]))
+        .fragment_shader(fs.entry_point("main").unwrap(), ())
+        .depth_stencil_state(DepthStencilState::simple_depth_test())
+        .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
+        .build(device.clone())
+        .unwrap();
+
+    (pipeline, framebuffers)
+}
