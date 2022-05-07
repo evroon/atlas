@@ -92,19 +92,13 @@ pub fn init(title: &str) -> System {
         let surface_capabilities = physical_device
             .surface_capabilities(&surface, Default::default())
             .unwrap();
-        let image_format = Some(
-            physical_device
-                .surface_formats(&surface, Default::default())
-                .unwrap()[0]
-                .0,
-        );
 
         Swapchain::new(
             device.clone(),
             surface.clone(),
             SwapchainCreateInfo {
                 min_image_count: surface_capabilities.min_image_count,
-                image_format,
+                image_format: Some(Format::B8G8R8A8_SRGB),
                 image_extent: surface.window().inner_size().into(),
                 image_usage: ImageUsage::color_attachment(),
                 composite_alpha: surface_capabilities
