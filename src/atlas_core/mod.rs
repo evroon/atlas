@@ -1,6 +1,4 @@
 use std::{sync::Arc};
-// use imgui::{Context, FontSource, FontConfig, FontGlyphRanges};
-// use imgui_winit_support::{HiDpiMode, WinitPlatform};
 use vulkano::{
     device::{
         physical::{PhysicalDevice, PhysicalDeviceType},
@@ -20,13 +18,9 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
-// use crate::atlas_core::imgui_wrapper::Renderer;
-
 use self::mesh::{Vertex, Normal};
 
 pub mod mesh;
-// pub mod imgui_wrapper;
-// mod clipboard;
 
 pub struct System {
     pub event_loop: EventLoop<()>,
@@ -121,42 +115,6 @@ pub fn init(title: &str) -> System {
         )
         .unwrap()
     };
-
-    // let mut imgui = Context::create();
-    // imgui.set_ini_filename(None);
-
-    // if let Some(backend) = clipboard::init() {
-    //     imgui.set_clipboard_backend(Box::new(backend));
-    // } else {
-    //     eprintln!("Failed to initialize clipboard");
-    // }
-
-    // let mut platform = WinitPlatform::init(&mut imgui);
-    // platform.attach_window(imgui.io_mut(), &surface.window(), HiDpiMode::Rounded);
-
-    // let hidpi_factor = platform.hidpi_factor();
-    // let font_size = (13.0 * hidpi_factor) as f32;
-    // imgui.fonts().add_font(&[
-    //     FontSource::DefaultFontData {
-    //         config: Some(FontConfig {
-    //             size_pixels: font_size,
-    //             ..FontConfig::default()
-    //         }),
-    //     },
-    //     FontSource::TtfData {
-    //         data: include_bytes!("../../assets/fonts/mplus-1p-regular.ttf"),
-    //         size_pixels: font_size,
-    //         config: Some(FontConfig {
-    //             rasterizer_multiply: 1.75,
-    //             glyph_ranges: FontGlyphRanges::japanese(),
-    //             ..FontConfig::default()
-    //         }),
-    //     },
-    // ]);
-
-    // imgui.io_mut().font_global_scale = (1.0 / hidpi_factor) as f32;
-
-    // let renderer = Renderer::init(&mut imgui, device.clone(), queue.clone(), format).expect("Failed to initialize renderer");
     
     System {
         event_loop,
@@ -168,15 +126,16 @@ pub fn init(title: &str) -> System {
     }
 }
 
-/// This method is called once during initialization, then again whenever the window is resized
 pub fn window_size_dependent_setup(
     device: Arc<Device>,
     vs: &ShaderModule,
     fs: &ShaderModule,
     images: &[Arc<SwapchainImage<Window>>],
     render_pass: Arc<RenderPass>,
+    viewport: &mut Viewport,
 ) -> (Arc<GraphicsPipeline>, Vec<Arc<Framebuffer>>) {
     let dimensions = images[0].dimensions().width_height();
+    viewport.dimensions = [dimensions[0] as f32, dimensions[1] as f32];
 
     let depth_buffer = ImageView::new_default(
         AttachmentImage::transient(device.clone(), dimensions, Format::D16_UNORM).unwrap(),
@@ -210,13 +169,7 @@ pub fn window_size_dependent_setup(
         )
         .vertex_shader(vs.entry_point("main").unwrap(), ())
         .input_assembly_state(InputAssemblyState::new())
-        .viewport_state(ViewportState::viewport_fixed_scissor_irrelevant([
-            Viewport {
-                origin: [0.0, 0.0],
-                dimensions: [dimensions[0] as f32, dimensions[1] as f32],
-                depth_range: 0.0..1.0,
-            },
-        ]))
+        .viewport_state(ViewportState::viewport_dynamic_scissor_irrelevant())
         .fragment_shader(fs.entry_point("main").unwrap(), ())
         .depth_stencil_state(DepthStencilState::simple_depth_test())
         .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())

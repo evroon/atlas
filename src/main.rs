@@ -7,6 +7,7 @@
 // notice may not be copied, modified, or distributed except
 // according to those terms.
 
+use egui::{ColorImage};
 use cgmath::{Matrix3, Matrix4, Point3, Rad, Vector3};
 use std::{time::Instant};
 use vulkano::{
@@ -15,12 +16,12 @@ use vulkano::{
     descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet},
     format::Format,
     pipeline::{
-        Pipeline, PipelineBindPoint,
+        Pipeline, PipelineBindPoint, graphics::viewport::Viewport,
     },
     swapchain::{
         acquire_next_image, AcquireError, SwapchainCreateInfo, SwapchainCreationError,
     },
-    sync::{self, FlushError, GpuFuture},
+    sync::{self, FlushError, GpuFuture}, render_pass::Subpass,
 };
 use winit::{
     event::{Event, WindowEvent},
@@ -52,7 +53,8 @@ fn main() {
     let vs = vs_mod::load(device.clone()).unwrap();
     let fs = fs_mod::load(device.clone()).unwrap();
 
-    let render_pass = vulkano::single_pass_renderpass!(device.clone(),
+    let render_pass = vulkano::ordered_passes_renderpass!(
+        device.clone(),
         attachments: {
             color: {
                 load: Clear,
@@ -67,20 +69,36 @@ fn main() {
                 samples: 1,
             }
         },
-        pass: {
-            color: [color],
-            depth_stencil: {depth}
-        }
+        passes: [
+            { color: [color], depth_stencil: {depth}, input: [] }, // default renderpass
+            { color: [color], depth_stencil: {}, input: [] } // egui renderpass
+        ]
     )
     .unwrap();
+    
+    let mut viewport = Viewport {
+        origin: [0.0, 0.0],
+        dimensions: [0.0, 0.0],
+        depth_range: 0.0..1.0,
+    };
 
     let (mut pipeline, mut framebuffers) =
-    atlas_core::window_size_dependent_setup(device.clone(), &vs, &fs, &images, render_pass.clone());
+    atlas_core::window_size_dependent_setup(device.clone(), &vs, &fs, &images, render_pass.clone(), &mut viewport);
     let mut recreate_swapchain = false;
 
     let mut previous_frame_end = Some(sync::now(device.clone()).boxed());
     let rotation_start = Instant::now();
+    let egui_ctx = egui::Context::default();
+    let mut egui_winit = egui_winit::State::new(4096, &surface.window());
 
+    let mut egui_painter = egui_vulkano::Painter::new(
+        device.clone(),
+        queue.clone(),
+        Subpass::from(render_pass.clone(), 1).expect("Could not create egui subpass"),
+    )
+    .expect("Could not create egui painter");
+
+    let mut my_texture = egui_ctx.load_texture("my_texture", ColorImage::example());
 
     system.event_loop.run(move |event, _, control_flow| {
         match event {
@@ -95,6 +113,12 @@ fn main() {
                 ..
             } => {
                 recreate_swapchain = true;
+            }
+            Event::WindowEvent { event, .. } => {
+                let egui_consumed_event = egui_winit.on_event(&egui_ctx, &event);
+                if !egui_consumed_event {
+                    // TODO
+                };
             }
             Event::RedrawEventsCleared => {
                 previous_frame_end.as_mut().unwrap().cleanup_finished();
@@ -117,6 +141,7 @@ fn main() {
                         &fs,
                         &new_images,
                         render_pass.clone(),
+                        &mut viewport
                     );
                     pipeline = new_pipeline;
                     framebuffers = new_framebuffers;
@@ -185,6 +210,30 @@ fn main() {
                     CommandBufferUsage::OneTimeSubmit,
                 )
                 .unwrap();
+
+                egui_ctx.begin_frame(egui_winit.take_egui_input(surface.window()));
+
+                egui::Window::new("Settings").show(&egui_ctx, |ui| {
+                    egui_ctx.settings_ui(ui);
+                });
+
+                egui::Window::new("Texture test").show(&egui_ctx, |ui| {
+                    ui.image(my_texture.id(), (200.0, 200.0));
+                    if ui.button("Reload texture").clicked() {
+                        // previous TextureHandle is dropped, causing egui to free the texture:
+                        my_texture = egui_ctx.load_texture("my_texture", ColorImage::example());
+                    }
+                });
+
+                // Get the shapes from egui
+                let egui_output = egui_ctx.end_frame();
+                let platform_output = egui_output.platform_output;
+                egui_winit.handle_platform_output(surface.window(), &egui_ctx, platform_output);
+
+                let _ = egui_painter
+                    .update_textures(egui_output.textures_delta, &mut builder)
+                    .expect("egui texture error");
+
                 builder
                     .begin_render_pass(
                         framebuffers[image_num].clone(),
@@ -192,6 +241,7 @@ fn main() {
                         vec![[0.0, 0.0, 1.0, 1.0].into(), 1f32.into()],
                     )
                     .unwrap()
+                    .set_viewport(0, [viewport.clone()])
                     .bind_pipeline_graphics(pipeline.clone())
                     .bind_descriptor_sets(
                         PipelineBindPoint::Graphics,
@@ -202,9 +252,22 @@ fn main() {
                     .bind_vertex_buffers(0, (vertex_buffer.clone(), normals_buffer.clone()))
                     .bind_index_buffer(index_buffer.clone())
                     .draw_indexed(index_buffer.len() as u32, 1, 0, 0, 0)
-                    .unwrap()
-                    .end_render_pass()
                     .unwrap();
+
+
+                let size = surface.window().inner_size();
+                let sf: f32 = surface.window().scale_factor() as f32;
+                egui_painter
+                    .draw(
+                        &mut builder,
+                        [(size.width as f32) / sf, (size.height as f32) / sf],
+                        &egui_ctx,
+                        egui_output.shapes,
+                    )
+                    .unwrap();
+
+                builder.end_render_pass().unwrap();
+
                 let command_buffer = builder.build().unwrap();
 
                 let future = previous_frame_end
