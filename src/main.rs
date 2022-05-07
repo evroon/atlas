@@ -7,6 +7,7 @@
 // notice may not be copied, modified, or distributed except
 // according to those terms.
 
+use atlas_core::mesh::load_gltf;
 use egui::{ColorImage};
 use cgmath::{Matrix3, Matrix4, Point3, Rad, Vector3};
 use std::{time::Instant};
@@ -29,8 +30,6 @@ use winit::{
 };
 
 mod atlas_core;
-mod teapot;
-use crate::teapot::{VERTICES, NORMALS, INDICES};
 
 fn main() {    
     let system = atlas_core::init("Atlas Engine");
@@ -40,13 +39,15 @@ fn main() {
     let surface = system.surface;
     let queue = system.queue;
 
+    let (vertices, normals, faces) = load_gltf();
+
     let vertex_buffer =
-        CpuAccessibleBuffer::from_iter(device.clone(), BufferUsage::all(), false, VERTICES)
+        CpuAccessibleBuffer::from_iter(device.clone(), BufferUsage::all(), false, vertices)
             .unwrap();
     let normals_buffer =
-        CpuAccessibleBuffer::from_iter(device.clone(), BufferUsage::all(), false, NORMALS).unwrap();
+        CpuAccessibleBuffer::from_iter(device.clone(), BufferUsage::all(), false, normals).unwrap();
     let index_buffer =
-        CpuAccessibleBuffer::from_iter(device.clone(), BufferUsage::all(), false, INDICES).unwrap();
+        CpuAccessibleBuffer::from_iter(device.clone(), BufferUsage::all(), false, faces).unwrap();
 
     let uniform_buffer = CpuBufferPool::<vs_mod::ty::Data>::new(device.clone(), BufferUsage::all());
 
@@ -169,7 +170,7 @@ fn main() {
                         Point3::new(0.0, 0.0, 0.0),
                         Vector3::new(0.0, -1.0, 0.0),
                     );
-                    let scale = Matrix4::from_scale(0.01);
+                    let scale = Matrix4::from_scale(0.25);
                     let view_scaled = view * scale;
                     let world = Matrix4::from(rotation);
 
