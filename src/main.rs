@@ -9,6 +9,7 @@
 
 use atlas_core::mesh::load_gltf;
 use cgmath::{Matrix3, Matrix4, Point3, Rad, Vector3};
+use egui::TextStyle;
 use egui_vulkano::UpdateTexturesResult;
 use std::{time::Instant, sync::Arc};
 use vulkano::{
@@ -118,6 +119,13 @@ fn main() {
     let mut previous_frame_end = Some(FrameEndFuture::now(device.clone()));
     let rotation_start = Instant::now();
     let egui_ctx = egui::Context::default();
+
+    // Increase text size
+    let mut style: egui::Style = (*egui_ctx.style()).clone();
+    style.text_styles.get_mut(&TextStyle::Button).unwrap().size = 19.0;
+    style.text_styles.get_mut(&TextStyle::Body).unwrap().size = 19.0;
+    egui_ctx.set_style(style);
+
     let mut egui_winit = egui_winit::State::new(4096, &surface.window());
 
     let mut egui_painter = egui_vulkano::Painter::new(
