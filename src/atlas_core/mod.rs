@@ -21,6 +21,7 @@ use winit::{
 use self::mesh::{Vertex, Normal};
 
 pub mod mesh;
+pub mod egui;
 
 pub struct System {
     pub event_loop: EventLoop<()>,

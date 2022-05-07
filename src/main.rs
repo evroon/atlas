@@ -1,17 +1,6 @@
-// Copyright (c) 2016 The vulkano developers
-// Licensed under the Apache License, Version 2.0
-// <LICENSE-APACHE or
-// https://www.apache.org/licenses/LICENSE-2.0> or the MIT
-// license <LICENSE-MIT or https://opensource.org/licenses/MIT>,
-// at your option. All files in the project carrying such
-// notice may not be copied, modified, or distributed except
-// according to those terms.
-
-use atlas_core::mesh::load_gltf;
+use atlas_core::{mesh::load_gltf, egui::{get_egui_context, FrameEndFuture, render_egui, update_textures_egui}};
 use cgmath::{Matrix3, Matrix4, Point3, Rad, Vector3};
-use egui::TextStyle;
-use egui_vulkano::UpdateTexturesResult;
-use std::{time::Instant, sync::Arc};
+use std::{time::Instant};
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer, CpuBufferPool, TypedBufferAccess},
     command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, SubpassContents},
@@ -23,7 +12,7 @@ use vulkano::{
     swapchain::{
         acquire_next_image, AcquireError, SwapchainCreateInfo, SwapchainCreationError,
     },
-    sync::{self, FlushError, GpuFuture, FenceSignalFuture}, render_pass::Subpass, device::Device,
+    sync::{FlushError, GpuFuture},
 };
 use winit::{
     event::{Event, WindowEvent},
@@ -32,64 +21,32 @@ use winit::{
 
 mod atlas_core;
 
-pub enum FrameEndFuture<F: GpuFuture + 'static> {
-    FenceSignalFuture(FenceSignalFuture<F>),
-    BoxedFuture(Box<dyn GpuFuture>),
-}
-
-impl<F: GpuFuture> FrameEndFuture<F> {
-    pub fn now(device: Arc<Device>) -> Self {
-        Self::BoxedFuture(sync::now(device).boxed())
-    }
-
-    pub fn get(self) -> Box<dyn GpuFuture> {
-        match self {
-            FrameEndFuture::FenceSignalFuture(f) => f.boxed(),
-            FrameEndFuture::BoxedFuture(f) => f,
-        }
-    }
-}
-
-impl<F: GpuFuture> AsMut<dyn GpuFuture> for FrameEndFuture<F> {
-    fn as_mut(&mut self) -> &mut (dyn GpuFuture + 'static) {
-        match self {
-            FrameEndFuture::FenceSignalFuture(f) => f,
-            FrameEndFuture::BoxedFuture(f) => f,
-        }
-    }
-}
-
 
 fn main() {    
-    let system = atlas_core::init("Atlas Engine");
-    let device = system.device;
-    let mut swapchain = system.swapchain;
-    let images = system.images;
-    let surface = system.surface;
-    let queue = system.queue;
+    let mut system = atlas_core::init("Atlas Engine");
 
     let (vertices, normals, faces) = load_gltf();
 
     let vertex_buffer =
-        CpuAccessibleBuffer::from_iter(device.clone(), BufferUsage::all(), false, vertices)
+        CpuAccessibleBuffer::from_iter(system.device.clone(), BufferUsage::all(), false, vertices)
             .unwrap();
     let normals_buffer =
-        CpuAccessibleBuffer::from_iter(device.clone(), BufferUsage::all(), false, normals).unwrap();
+        CpuAccessibleBuffer::from_iter(system.device.clone(), BufferUsage::all(), false, normals).unwrap();
     let index_buffer =
-        CpuAccessibleBuffer::from_iter(device.clone(), BufferUsage::all(), false, faces).unwrap();
+        CpuAccessibleBuffer::from_iter(system.device.clone(), BufferUsage::all(), false, faces).unwrap();
 
-    let uniform_buffer = CpuBufferPool::<vs_mod::ty::Data>::new(device.clone(), BufferUsage::all());
+    let uniform_buffer = CpuBufferPool::<vs_mod::ty::Data>::new(system.device.clone(), BufferUsage::all());
 
-    let vs = vs_mod::load(device.clone()).unwrap();
-    let fs = fs_mod::load(device.clone()).unwrap();
+    let vs = vs_mod::load(system.device.clone()).unwrap();
+    let fs = fs_mod::load(system.device.clone()).unwrap();
 
     let render_pass = vulkano::ordered_passes_renderpass!(
-        device.clone(),
+        system.device.clone(),
         attachments: {
             color: {
                 load: Clear,
                 store: Store,
-                format: swapchain.image_format(),
+                format: system.swapchain.image_format(),
                 samples: 1,
             },
             depth: {
@@ -113,27 +70,13 @@ fn main() {
     };
 
     let (mut pipeline, mut framebuffers) =
-    atlas_core::window_size_dependent_setup(device.clone(), &vs, &fs, &images, render_pass.clone(), &mut viewport);
+    atlas_core::window_size_dependent_setup(system.device.clone(), &vs, &fs, &system.images, render_pass.clone(), &mut viewport);
     let mut recreate_swapchain = false;
 
-    let mut previous_frame_end = Some(FrameEndFuture::now(device.clone()));
+    let mut previous_frame_end = Some(FrameEndFuture::now(system.device.clone()));
     let rotation_start = Instant::now();
-    let egui_ctx = egui::Context::default();
 
-    // Increase text size
-    let mut style: egui::Style = (*egui_ctx.style()).clone();
-    style.text_styles.get_mut(&TextStyle::Button).unwrap().size = 19.0;
-    style.text_styles.get_mut(&TextStyle::Body).unwrap().size = 19.0;
-    egui_ctx.set_style(style);
-
-    let mut egui_winit = egui_winit::State::new(4096, &surface.window());
-
-    let mut egui_painter = egui_vulkano::Painter::new(
-        device.clone(),
-        queue.clone(),
-        Subpass::from(render_pass.clone(), 1).expect("Could not create egui subpass"),
-    )
-    .expect("Could not create egui painter");
+    let (egui_ctx, mut egui_winit, mut egui_painter) = get_egui_context(&system, &render_pass);
 
     system.event_loop.run(move |event, _, control_flow| {
         match event {
@@ -160,18 +103,18 @@ fn main() {
 
                 if recreate_swapchain {
                     let (new_swapchain, new_images) =
-                        match swapchain.recreate(SwapchainCreateInfo {
-                            image_extent: surface.window().inner_size().into(),
-                            ..swapchain.create_info()
+                        match system.swapchain.recreate(SwapchainCreateInfo {
+                            image_extent: system.surface.window().inner_size().into(),
+                            ..system.swapchain.create_info()
                         }) {
                             Ok(r) => r,
                             Err(SwapchainCreationError::ImageExtentNotSupported { .. }) => return,
                             Err(e) => panic!("Failed to recreate swapchain: {:?}", e),
                         };
 
-                    swapchain = new_swapchain;
+                        system.swapchain = new_swapchain;
                     let (new_pipeline, new_framebuffers) = atlas_core::window_size_dependent_setup(
-                        device.clone(),
+                        system.device.clone(),
                         &vs,
                         &fs,
                         &new_images,
@@ -192,7 +135,7 @@ fn main() {
                     // note: this teapot was meant for OpenGL where the origin is at the lower left
                     //       instead the origin is at the upper left in Vulkan, so we reverse the Y axis
                     let aspect_ratio =
-                        swapchain.image_extent()[0] as f32 / swapchain.image_extent()[1] as f32;
+                    system.swapchain.image_extent()[0] as f32 / system.swapchain.image_extent()[1] as f32;
                     let proj = cgmath::perspective(
                         Rad(std::f32::consts::FRAC_PI_2),
                         aspect_ratio,
@@ -226,7 +169,7 @@ fn main() {
                 .unwrap();
 
                 let (image_num, suboptimal, acquire_future) =
-                    match acquire_next_image(swapchain.clone(), None) {
+                    match acquire_next_image(system.swapchain.clone(), None) {
                         Ok(r) => r,
                         Err(AcquireError::OutOfDate) => {
                             recreate_swapchain = true;
@@ -240,28 +183,13 @@ fn main() {
                 }
 
                 let mut builder = AutoCommandBufferBuilder::primary(
-                    device.clone(),
-                    queue.family(),
+                    system.device.clone(),
+                    system.queue.family(),
                     CommandBufferUsage::OneTimeSubmit,
                 )
                 .unwrap();
 
-                egui_ctx.begin_frame(egui_winit.take_egui_input(surface.window()));
-
-                egui::Window::new("Settings").show(&egui_ctx, |ui| {
-                    egui_ctx.settings_ui(ui);
-                });
-
-                // Get the shapes from egui
-                let egui_output = egui_ctx.end_frame();
-                let platform_output = egui_output.platform_output;
-                egui_winit.handle_platform_output(surface.window(), &egui_ctx, platform_output);
-
-                let result = egui_painter
-                    .update_textures(egui_output.textures_delta, &mut builder)
-                    .expect("egui texture error");
-
-                let wait_for_last_frame = result == UpdateTexturesResult::Changed;
+                let (shapes, wait_for_last_frame) = update_textures_egui(&mut builder, &system.surface, &egui_ctx, &mut egui_painter, &mut egui_winit);
 
                 builder
                     .begin_render_pass(
@@ -284,16 +212,7 @@ fn main() {
                     .unwrap();
 
 
-                let size = surface.window().inner_size();
-                let sf: f32 = surface.window().scale_factor() as f32;
-                egui_painter
-                    .draw(
-                        &mut builder,
-                        [(size.width as f32) / sf, (size.height as f32) / sf],
-                        &egui_ctx,
-                        egui_output.shapes,
-                    )
-                    .unwrap();
+                render_egui(&mut builder, &system.surface, &egui_ctx, shapes, &mut egui_painter);
 
                 builder.end_render_pass().unwrap();
 
@@ -310,9 +229,9 @@ fn main() {
                     .unwrap()
                     .get()
                     .join(acquire_future)
-                    .then_execute(queue.clone(), command_buffer)
+                    .then_execute(system.queue.clone(), command_buffer)
                     .unwrap()
-                    .then_swapchain_present(queue.clone(), swapchain.clone(), image_num)
+                    .then_swapchain_present(system.queue.clone(), system.swapchain.clone(), image_num)
                     .then_signal_fence_and_flush();
 
                 match future {
@@ -321,11 +240,11 @@ fn main() {
                     }
                     Err(FlushError::OutOfDate) => {
                         recreate_swapchain = true;
-                        previous_frame_end = Some(FrameEndFuture::now(device.clone()));
+                        previous_frame_end = Some(FrameEndFuture::now(system.device.clone()));
                     }
                     Err(e) => {
                         println!("Failed to flush future: {:?}", e);
-                        previous_frame_end = Some(FrameEndFuture::now(device.clone()));
+                        previous_frame_end = Some(FrameEndFuture::now(system.device.clone()));
                     }
                 }
             }
