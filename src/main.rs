@@ -8,9 +8,9 @@
 // according to those terms.
 
 use atlas_core::mesh::load_gltf;
-use egui::{ColorImage};
 use cgmath::{Matrix3, Matrix4, Point3, Rad, Vector3};
-use std::{time::Instant};
+use egui_vulkano::UpdateTexturesResult;
+use std::{time::Instant, sync::Arc};
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer, CpuBufferPool, TypedBufferAccess},
     command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, SubpassContents},
@@ -22,7 +22,7 @@ use vulkano::{
     swapchain::{
         acquire_next_image, AcquireError, SwapchainCreateInfo, SwapchainCreationError,
     },
-    sync::{self, FlushError, GpuFuture}, render_pass::Subpass,
+    sync::{self, FlushError, GpuFuture, FenceSignalFuture}, render_pass::Subpass, device::Device,
 };
 use winit::{
     event::{Event, WindowEvent},
@@ -30,6 +30,34 @@ use winit::{
 };
 
 mod atlas_core;
+
+pub enum FrameEndFuture<F: GpuFuture + 'static> {
+    FenceSignalFuture(FenceSignalFuture<F>),
+    BoxedFuture(Box<dyn GpuFuture>),
+}
+
+impl<F: GpuFuture> FrameEndFuture<F> {
+    pub fn now(device: Arc<Device>) -> Self {
+        Self::BoxedFuture(sync::now(device).boxed())
+    }
+
+    pub fn get(self) -> Box<dyn GpuFuture> {
+        match self {
+            FrameEndFuture::FenceSignalFuture(f) => f.boxed(),
+            FrameEndFuture::BoxedFuture(f) => f,
+        }
+    }
+}
+
+impl<F: GpuFuture> AsMut<dyn GpuFuture> for FrameEndFuture<F> {
+    fn as_mut(&mut self) -> &mut (dyn GpuFuture + 'static) {
+        match self {
+            FrameEndFuture::FenceSignalFuture(f) => f,
+            FrameEndFuture::BoxedFuture(f) => f,
+        }
+    }
+}
+
 
 fn main() {    
     let system = atlas_core::init("Atlas Engine");
@@ -87,7 +115,7 @@ fn main() {
     atlas_core::window_size_dependent_setup(device.clone(), &vs, &fs, &images, render_pass.clone(), &mut viewport);
     let mut recreate_swapchain = false;
 
-    let mut previous_frame_end = Some(sync::now(device.clone()).boxed());
+    let mut previous_frame_end = Some(FrameEndFuture::now(device.clone()));
     let rotation_start = Instant::now();
     let egui_ctx = egui::Context::default();
     let mut egui_winit = egui_winit::State::new(4096, &surface.window());
@@ -98,8 +126,6 @@ fn main() {
         Subpass::from(render_pass.clone(), 1).expect("Could not create egui subpass"),
     )
     .expect("Could not create egui painter");
-
-    let mut my_texture = egui_ctx.load_texture("my_texture", ColorImage::example());
 
     system.event_loop.run(move |event, _, control_flow| {
         match event {
@@ -122,7 +148,7 @@ fn main() {
                 };
             }
             Event::RedrawEventsCleared => {
-                previous_frame_end.as_mut().unwrap().cleanup_finished();
+                previous_frame_end.as_mut().unwrap().as_mut().cleanup_finished();
 
                 if recreate_swapchain {
                     let (new_swapchain, new_images) =
@@ -218,22 +244,16 @@ fn main() {
                     egui_ctx.settings_ui(ui);
                 });
 
-                egui::Window::new("Texture test").show(&egui_ctx, |ui| {
-                    ui.image(my_texture.id(), (200.0, 200.0));
-                    if ui.button("Reload texture").clicked() {
-                        // previous TextureHandle is dropped, causing egui to free the texture:
-                        my_texture = egui_ctx.load_texture("my_texture", ColorImage::example());
-                    }
-                });
-
                 // Get the shapes from egui
                 let egui_output = egui_ctx.end_frame();
                 let platform_output = egui_output.platform_output;
                 egui_winit.handle_platform_output(surface.window(), &egui_ctx, platform_output);
 
-                let _ = egui_painter
+                let result = egui_painter
                     .update_textures(egui_output.textures_delta, &mut builder)
                     .expect("egui texture error");
+
+                let wait_for_last_frame = result == UpdateTexturesResult::Changed;
 
                 builder
                     .begin_render_pass(
@@ -271,9 +291,16 @@ fn main() {
 
                 let command_buffer = builder.build().unwrap();
 
+                if wait_for_last_frame {
+                    if let Some(FrameEndFuture::FenceSignalFuture(ref mut f)) = previous_frame_end {
+                        f.wait(None).unwrap();
+                    }
+                }
+
                 let future = previous_frame_end
                     .take()
                     .unwrap()
+                    .get()
                     .join(acquire_future)
                     .then_execute(queue.clone(), command_buffer)
                     .unwrap()
@@ -282,15 +309,15 @@ fn main() {
 
                 match future {
                     Ok(future) => {
-                        previous_frame_end = Some(future.boxed());
+                        previous_frame_end = Some(FrameEndFuture::FenceSignalFuture(future));
                     }
                     Err(FlushError::OutOfDate) => {
                         recreate_swapchain = true;
-                        previous_frame_end = Some(sync::now(device.clone()).boxed());
+                        previous_frame_end = Some(FrameEndFuture::now(device.clone()));
                     }
                     Err(e) => {
                         println!("Failed to flush future: {:?}", e);
-                        previous_frame_end = Some(sync::now(device.clone()).boxed());
+                        previous_frame_end = Some(FrameEndFuture::now(device.clone()));
                     }
                 }
             }

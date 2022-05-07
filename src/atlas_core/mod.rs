@@ -15,7 +15,7 @@ use vulkano::{
 use vulkano_win::VkSurfaceBuild;
 use winit::{
     event_loop::{EventLoop},
-    window::{Window, WindowBuilder},
+    window::{Window, WindowBuilder}, dpi::{LogicalSize},
 };
 
 use self::mesh::{Vertex, Normal};
@@ -42,6 +42,8 @@ pub fn init(title: &str) -> System {
     let event_loop = EventLoop::new();
     let surface = WindowBuilder::new()
         .with_title(title)
+        .with_inner_size(LogicalSize::new(3000.0, 2000.0))
+        // .with_fullscreen(Some(Fullscreen::Borderless(None)))
         .build_vk_surface(&event_loop, instance.clone())
         .expect("Failed to create a window");
 
