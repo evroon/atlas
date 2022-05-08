@@ -19,6 +19,7 @@ use winit::{
     event::{Event, WindowEvent},
     event_loop::ControlFlow,
 };
+use winit_input_helper::WinitInputHelper;
 
 mod atlas_core;
 
@@ -78,8 +79,13 @@ fn main() {
     let (egui_ctx, mut egui_winit, mut egui_painter) = get_egui_context(&system, &render_pass);
 
     let mut camera = construct_camera();
+    let mut input = WinitInputHelper::new();
 
     system.event_loop.run(move |event, _, control_flow| {
+        if input.update(&event) {
+            camera.handle_event(&input);
+        }
+
         match event {
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
@@ -94,10 +100,7 @@ fn main() {
                 recreate_swapchain = true;
             }
             Event::WindowEvent { event, .. } => {
-                let egui_consumed_event = egui_winit.on_event(&egui_ctx, &event);
-                if !egui_consumed_event {
-                    camera.handle_event(&event);
-                };
+                egui_winit.on_event(&egui_ctx, &event);
             }
             Event::RedrawEventsCleared => {
                 previous_frame_end
@@ -137,8 +140,6 @@ fn main() {
                         elapsed.as_secs() as f64 + elapsed.subsec_nanos() as f64 / 1_000_000_000.0;
                     let rotation = Matrix3::from_angle_y(Rad(rotation as f32));
 
-                    // note: this teapot was meant for OpenGL where the origin is at the lower left
-                    //       instead the origin is at the upper left in Vulkan, so we reverse the Y axis
                     let extent = system.swapchain.image_extent();
                     camera.aspect_ratio = extent[0] as f32 / extent[1] as f32;
                     camera.update(rotation);
