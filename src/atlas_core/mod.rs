@@ -1,36 +1,46 @@
-use std::{sync::Arc};
+use std::sync::Arc;
 use vulkano::{
     device::{
         physical::{PhysicalDevice, PhysicalDeviceType},
-        Device, DeviceCreateInfo, DeviceExtensions, QueueCreateInfo, Queue,
+        Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo,
     },
     format::Format,
     image::{view::ImageView, AttachmentImage, ImageAccess, ImageUsage, SwapchainImage},
     instance::{Instance, InstanceCreateInfo},
-    swapchain::{
-        Swapchain, SwapchainCreateInfo, Surface,
-    }, shader::ShaderModule, render_pass::{RenderPass, Framebuffer, FramebufferCreateInfo, Subpass}, pipeline::{GraphicsPipeline, graphics::{vertex_input::{BuffersDefinition}, depth_stencil::DepthStencilState, viewport::{ViewportState, Viewport}, input_assembly::InputAssemblyState}},
+    pipeline::{
+        graphics::{
+            depth_stencil::DepthStencilState,
+            input_assembly::InputAssemblyState,
+            vertex_input::BuffersDefinition,
+            viewport::{Viewport, ViewportState},
+        },
+        GraphicsPipeline,
+    },
+    render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass, Subpass},
+    shader::ShaderModule,
+    swapchain::{Surface, Swapchain, SwapchainCreateInfo},
 };
 
 use vulkano_win::VkSurfaceBuild;
 use winit::{
-    event_loop::{EventLoop},
-    window::{Window, WindowBuilder}, dpi::{LogicalSize},
+    dpi::LogicalSize,
+    event_loop::EventLoop,
+    window::{Window, WindowBuilder},
 };
 
-use self::mesh::{Vertex, Normal};
+use self::mesh::{Normal, Vertex};
 
-pub mod mesh;
-pub mod egui;
 pub mod camera;
+pub mod egui;
+pub mod mesh;
 
 pub struct System {
     pub event_loop: EventLoop<()>,
-    pub device : Arc<Device>,
-    pub swapchain : Arc<Swapchain<Window>>,
-    pub images : Vec<Arc<SwapchainImage<Window>>>,
-    pub surface : Arc<Surface<Window>>,
-    pub queue: Arc<Queue>
+    pub device: Arc<Device>,
+    pub swapchain: Arc<Swapchain<Window>>,
+    pub images: Vec<Arc<SwapchainImage<Window>>>,
+    pub surface: Arc<Surface<Window>>,
+    pub queue: Arc<Queue>,
 }
 
 pub fn init(title: &str) -> System {
@@ -40,7 +50,7 @@ pub fn init(title: &str) -> System {
         ..Default::default()
     })
     .unwrap();
-    
+
     let event_loop = EventLoop::new();
     let surface = WindowBuilder::new()
         .with_title(title)
@@ -48,7 +58,6 @@ pub fn init(title: &str) -> System {
         // .with_fullscreen(Some(Fullscreen::Borderless(None)))
         .build_vk_surface(&event_loop, instance.clone())
         .expect("Failed to create a window");
-
 
     let device_extensions = DeviceExtensions {
         khr_swapchain: true,
@@ -113,7 +122,7 @@ pub fn init(title: &str) -> System {
         )
         .unwrap()
     };
-    
+
     System {
         event_loop,
         device,

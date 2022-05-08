@@ -1,6 +1,7 @@
 use cgmath::{Matrix3, Matrix4, Point3, Rad, Vector3};
 
 pub struct Camera {
+    pub position: Point3<f32>,
     pub aspect_ratio: f32,
     pub proj: Matrix4<f32>,
     pub view: Matrix4<f32>,
@@ -19,7 +20,7 @@ impl Camera {
         let scale: Matrix4<f32> = Matrix4::from_scale(0.25);
 
         self.view = Matrix4::look_at_rh(
-            Point3::new(0.3, 0.3, 1.0),
+            self.position,
             Point3::new(0.0, 0.0, 0.0),
             Vector3::new(0.0, -1.0, 0.0),
         ) * scale;
@@ -29,12 +30,36 @@ impl Camera {
     }
 }
 
-pub fn construct_camera() -> Camera { 
+pub fn construct_camera() -> Camera {
     Camera {
+        position: Point3::new(0.3, 0.3, 1.0),
         aspect_ratio: 1.0,
         proj: Matrix4::from_scale(1.0),
         view: Matrix4::from_scale(1.0),
         world: Matrix4::from_scale(1.0),
         world_view: Matrix4::from_scale(1.0),
+    }
+}
+
+pub trait CameraInputLogic {
+    fn handle_event(&mut self, event: &winit::event::WindowEvent);
+}
+
+impl CameraInputLogic for Camera {
+    fn handle_event(&mut self, event: &winit::event::WindowEvent) {
+        use winit::event::WindowEvent;
+        match event {
+            WindowEvent::KeyboardInput { input, .. } => {
+                match input.virtual_keycode {
+                    Some(winit::event::VirtualKeyCode::W) => {
+                        self.position.x += 0.1;
+                    }
+                    _ => {}
+                };
+            }
+            _ => {
+                // dbg!(event);
+            }
+        };
     }
 }

@@ -1,33 +1,34 @@
-use atlas_core::{mesh::load_gltf, egui::{get_egui_context, FrameEndFuture, render_egui, update_textures_egui}, camera::construct_camera};
+use crate::atlas_core::camera::CameraInputLogic;
+use atlas_core::{
+    camera::construct_camera,
+    egui::{get_egui_context, render_egui, update_textures_egui, FrameEndFuture},
+    mesh::load_gltf,
+};
 use cgmath::{Matrix3, Rad};
-use std::{time::Instant};
+use std::time::Instant;
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer, CpuBufferPool, TypedBufferAccess},
     command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, SubpassContents},
     descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet},
     format::Format,
-    pipeline::{
-        Pipeline, PipelineBindPoint, graphics::viewport::Viewport,
-    },
-    swapchain::{
-        acquire_next_image, AcquireError, SwapchainCreateInfo, SwapchainCreationError,
-    },
+    pipeline::{graphics::viewport::Viewport, Pipeline, PipelineBindPoint},
+    swapchain::{acquire_next_image, AcquireError, SwapchainCreateInfo, SwapchainCreationError},
     sync::{FlushError, GpuFuture},
 };
 use winit::{
     event::{Event, WindowEvent},
-    event_loop::{ControlFlow},
+    event_loop::ControlFlow,
 };
 
 mod atlas_core;
 
-
-fn main() {    
+fn main() {
     let mut system = atlas_core::init("Atlas Engine");
 
     let mesh = load_gltf(&system);
 
-    let uniform_buffer = CpuBufferPool::<vs_mod::ty::Data>::new(system.device.clone(), BufferUsage::all());
+    let uniform_buffer =
+        CpuBufferPool::<vs_mod::ty::Data>::new(system.device.clone(), BufferUsage::all());
 
     let vs = vs_mod::load(system.device.clone()).unwrap();
     let fs = fs_mod::load(system.device.clone()).unwrap();
@@ -54,15 +55,21 @@ fn main() {
         ]
     )
     .unwrap();
-    
+
     let mut viewport = Viewport {
         origin: [0.0, 0.0],
         dimensions: [0.0, 0.0],
         depth_range: 0.0..1.0,
     };
 
-    let (mut pipeline, mut framebuffers) =
-    atlas_core::window_size_dependent_setup(system.device.clone(), &vs, &fs, &system.images, render_pass.clone(), &mut viewport);
+    let (mut pipeline, mut framebuffers) = atlas_core::window_size_dependent_setup(
+        system.device.clone(),
+        &vs,
+        &fs,
+        &system.images,
+        render_pass.clone(),
+        &mut viewport,
+    );
     let mut recreate_swapchain = false;
 
     let mut previous_frame_end = Some(FrameEndFuture::now(system.device.clone()));
@@ -89,11 +96,15 @@ fn main() {
             Event::WindowEvent { event, .. } => {
                 let egui_consumed_event = egui_winit.on_event(&egui_ctx, &event);
                 if !egui_consumed_event {
-                    // TODO
+                    camera.handle_event(&event);
                 };
             }
             Event::RedrawEventsCleared => {
-                previous_frame_end.as_mut().unwrap().as_mut().cleanup_finished();
+                previous_frame_end
+                    .as_mut()
+                    .unwrap()
+                    .as_mut()
+                    .cleanup_finished();
 
                 if recreate_swapchain {
                     let (new_swapchain, new_images) =
@@ -106,14 +117,14 @@ fn main() {
                             Err(e) => panic!("Failed to recreate swapchain: {:?}", e),
                         };
 
-                        system.swapchain = new_swapchain;
+                    system.swapchain = new_swapchain;
                     let (new_pipeline, new_framebuffers) = atlas_core::window_size_dependent_setup(
                         system.device.clone(),
                         &vs,
                         &fs,
                         &new_images,
                         render_pass.clone(),
-                        &mut viewport
+                        &mut viewport,
                     );
                     pipeline = new_pipeline;
                     framebuffers = new_framebuffers;
@@ -128,7 +139,8 @@ fn main() {
 
                     // note: this teapot was meant for OpenGL where the origin is at the lower left
                     //       instead the origin is at the upper left in Vulkan, so we reverse the Y axis
-                    camera.aspect_ratio = system.swapchain.image_extent()[0] as f32 / system.swapchain.image_extent()[1] as f32;
+                    let extent = system.swapchain.image_extent();
+                    camera.aspect_ratio = extent[0] as f32 / extent[1] as f32;
                     camera.update(rotation);
 
                     let uniform_data = vs_mod::ty::Data {
@@ -169,7 +181,13 @@ fn main() {
                 )
                 .unwrap();
 
-                let (shapes, wait_for_last_frame) = update_textures_egui(&mut builder, &system.surface, &egui_ctx, &mut egui_painter, &mut egui_winit);
+                let (shapes, wait_for_last_frame) = update_textures_egui(
+                    &mut builder,
+                    &system.surface,
+                    &egui_ctx,
+                    &mut egui_painter,
+                    &mut egui_winit,
+                );
 
                 builder
                     .begin_render_pass(
@@ -186,13 +204,21 @@ fn main() {
                         0,
                         set.clone(),
                     )
-                    .bind_vertex_buffers(0, (mesh.vertex_buffer.clone(), mesh.normal_buffer.clone()))
+                    .bind_vertex_buffers(
+                        0,
+                        (mesh.vertex_buffer.clone(), mesh.normal_buffer.clone()),
+                    )
                     .bind_index_buffer(mesh.index_buffer.clone())
                     .draw_indexed(mesh.index_buffer.len() as u32, 1, 0, 0, 0)
                     .unwrap();
 
-
-                render_egui(&mut builder, &system.surface, &egui_ctx, shapes, &mut egui_painter);
+                render_egui(
+                    &mut builder,
+                    &system.surface,
+                    &egui_ctx,
+                    shapes,
+                    &mut egui_painter,
+                );
 
                 builder.end_render_pass().unwrap();
 
@@ -211,7 +237,11 @@ fn main() {
                     .join(acquire_future)
                     .then_execute(system.queue.clone(), command_buffer)
                     .unwrap()
-                    .then_swapchain_present(system.queue.clone(), system.swapchain.clone(), image_num)
+                    .then_swapchain_present(
+                        system.queue.clone(),
+                        system.swapchain.clone(),
+                        image_num,
+                    )
                     .then_signal_fence_and_flush();
 
                 match future {
@@ -232,7 +262,6 @@ fn main() {
         }
     });
 }
-
 
 mod vs_mod {
     vulkano_shaders::shader! {

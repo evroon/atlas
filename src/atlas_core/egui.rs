@@ -1,13 +1,18 @@
-use std::{sync::Arc};
+use std::sync::Arc;
 
-use egui::{TextStyle, epaint::ClippedShape};
+use egui::{epaint::ClippedShape, TextStyle};
 use egui_vulkano::UpdateTexturesResult;
 use egui_winit::State;
-use vulkano::{render_pass::{Subpass, RenderPass}, sync::{GpuFuture, FenceSignalFuture, self}, device::Device, command_buffer::{AutoCommandBufferBuilder, PrimaryAutoCommandBuffer}, swapchain::Surface};
+use vulkano::{
+    command_buffer::{AutoCommandBufferBuilder, PrimaryAutoCommandBuffer},
+    device::Device,
+    render_pass::{RenderPass, Subpass},
+    swapchain::Surface,
+    sync::{self, FenceSignalFuture, GpuFuture},
+};
 use winit::window::Window;
 
 use super::System;
-
 
 pub enum FrameEndFuture<F: GpuFuture + 'static> {
     FenceSignalFuture(FenceSignalFuture<F>),
@@ -36,7 +41,10 @@ impl<F: GpuFuture> AsMut<dyn GpuFuture> for FrameEndFuture<F> {
     }
 }
 
-pub fn get_egui_context(system: &System, render_pass: &Arc<RenderPass>) -> (egui::Context, State, egui_vulkano::Painter) {
+pub fn get_egui_context(
+    system: &System,
+    render_pass: &Arc<RenderPass>,
+) -> (egui::Context, State, egui_vulkano::Painter) {
     let egui_ctx = egui::Context::default();
 
     // Increase text size
@@ -51,7 +59,8 @@ pub fn get_egui_context(system: &System, render_pass: &Arc<RenderPass>) -> (egui
         system.device.clone(),
         system.queue.clone(),
         Subpass::from(render_pass.clone(), 1).expect("Could not create egui subpass"),
-    ).expect("Could not create egui painter");
+    )
+    .expect("Could not create egui painter");
 
     (egui_ctx, egui_winit, egui_painter)
 }
@@ -61,7 +70,7 @@ pub fn update_textures_egui(
     surface: &Arc<Surface<Window>>,
     egui_ctx: &egui::Context,
     egui_painter: &mut egui_vulkano::Painter,
-    egui_winit: &mut State
+    egui_winit: &mut State,
 ) -> (Vec<ClippedShape>, bool) {
     egui_ctx.begin_frame(egui_winit.take_egui_input(surface.window()));
 
@@ -82,7 +91,13 @@ pub fn update_textures_egui(
     (egui_output.shapes, wait_for_last_frame)
 }
 
-pub fn render_egui(builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>, surface: &Arc<Surface<Window>>, egui_ctx: &egui::Context, shapes: Vec<ClippedShape>, egui_painter: &mut egui_vulkano::Painter) {
+pub fn render_egui(
+    builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
+    surface: &Arc<Surface<Window>>,
+    egui_ctx: &egui::Context,
+    shapes: Vec<ClippedShape>,
+    egui_painter: &mut egui_vulkano::Painter,
+) {
     let size = surface.window().inner_size();
     let sf: f32 = surface.window().scale_factor() as f32;
     egui_painter

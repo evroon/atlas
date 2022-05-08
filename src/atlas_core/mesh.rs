@@ -1,9 +1,9 @@
 use crate::atlas_core::System;
-use vulkano::buffer::BufferUsage;
-use std::sync::Arc;
 use crate::CpuAccessibleBuffer;
 use bytemuck::{Pod, Zeroable};
-use russimp::{scene::{Scene, PostProcess}};
+use russimp::scene::{PostProcess, Scene};
+use std::sync::Arc;
+use vulkano::buffer::BufferUsage;
 use vulkano::impl_vertex;
 
 #[repr(C)]
@@ -38,20 +38,39 @@ pub struct MeshBuffer {
 }
 
 pub fn load_gltf(system: &System) -> MeshBuffer {
-    let scene = Scene::from_file("assets/models/monkey.glb",
-        vec![PostProcess::CalculateTangentSpace,
+    let scene = Scene::from_file(
+        "assets/models/monkey.glb",
+        vec![
+            PostProcess::CalculateTangentSpace,
             PostProcess::Triangulate,
             PostProcess::JoinIdenticalVertices,
-            PostProcess::SortByPrimitiveType]).expect("Could not load model");
+            PostProcess::SortByPrimitiveType,
+        ],
+    )
+    .expect("Could not load model");
 
     let assimp_vertices = &scene.meshes[0].vertices;
     let assimp_normals = &scene.meshes[0].normals;
     let assimp_faces = &scene.meshes[0].faces;
     let assimp_tex_coords = &scene.meshes[0].texture_coords;
 
-    let vertices: Vec<Vertex> = assimp_vertices.iter().map(|v| Vertex {position: [v.x, v.y, v.z]}).collect();
-    let normals: Vec<Normal> = assimp_normals.iter().map(|v| Normal {normal: [v.x, v.y, v.z]}).collect();
-    let indices: Vec<u32> = assimp_faces.iter().map(|f| [f.0[0], f.0[1], f.0[2]]).flatten().collect();
+    let vertices: Vec<Vertex> = assimp_vertices
+        .iter()
+        .map(|v| Vertex {
+            position: [v.x, v.y, v.z],
+        })
+        .collect();
+    let normals: Vec<Normal> = assimp_normals
+        .iter()
+        .map(|v| Normal {
+            normal: [v.x, v.y, v.z],
+        })
+        .collect();
+    let indices: Vec<u32> = assimp_faces
+        .iter()
+        .map(|f| [f.0[0], f.0[1], f.0[2]])
+        .flatten()
+        .collect();
 
     let mut tex_coord_buffer: Option<Arc<CpuAccessibleBuffer<[TexCoord]>>> = None;
 
@@ -59,19 +78,35 @@ pub fn load_gltf(system: &System) -> MeshBuffer {
         let tex_coords: Vec<TexCoord> = assimp_tex_coords
             .iter()
             .map(|tc| tc.as_ref().unwrap()[0])
-            .map(|tc| TexCoord {coordinate: [tc.x, tc.y]})
+            .map(|tc| TexCoord {
+                coordinate: [tc.x, tc.y],
+            })
             .collect();
-        tex_coord_buffer =
-            Some(CpuAccessibleBuffer::from_iter(system.device.clone(), BufferUsage::all(), false, tex_coords).unwrap());
+        tex_coord_buffer = Some(
+            CpuAccessibleBuffer::from_iter(
+                system.device.clone(),
+                BufferUsage::all(),
+                false,
+                tex_coords,
+            )
+            .unwrap(),
+        );
     }
 
-
     let vertex_buffer =
-        CpuAccessibleBuffer::from_iter(system.device.clone(), BufferUsage::all(), false, vertices).unwrap();
+        CpuAccessibleBuffer::from_iter(system.device.clone(), BufferUsage::all(), false, vertices)
+            .unwrap();
     let normal_buffer =
-        CpuAccessibleBuffer::from_iter(system.device.clone(), BufferUsage::all(), false, normals).unwrap();
+        CpuAccessibleBuffer::from_iter(system.device.clone(), BufferUsage::all(), false, normals)
+            .unwrap();
     let index_buffer =
-        CpuAccessibleBuffer::from_iter(system.device.clone(), BufferUsage::all(), false, indices).unwrap();
+        CpuAccessibleBuffer::from_iter(system.device.clone(), BufferUsage::all(), false, indices)
+            .unwrap();
 
-    MeshBuffer {vertex_buffer, normal_buffer, index_buffer, tex_coord_buffer}
+    MeshBuffer {
+        vertex_buffer,
+        normal_buffer,
+        index_buffer,
+        tex_coord_buffer,
+    }
 }
