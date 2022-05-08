@@ -22,6 +22,7 @@ use self::mesh::{Vertex, Normal};
 
 pub mod mesh;
 pub mod egui;
+pub mod camera;
 
 pub struct System {
     pub event_loop: EventLoop<()>,

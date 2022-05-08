@@ -1,5 +1,5 @@
-use atlas_core::{mesh::load_gltf, egui::{get_egui_context, FrameEndFuture, render_egui, update_textures_egui}};
-use cgmath::{Matrix3, Matrix4, Point3, Rad, Vector3};
+use atlas_core::{mesh::load_gltf, egui::{get_egui_context, FrameEndFuture, render_egui, update_textures_egui}, camera::construct_camera};
+use cgmath::{Matrix3, Rad};
 use std::{time::Instant};
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer, CpuBufferPool, TypedBufferAccess},
@@ -25,15 +25,7 @@ mod atlas_core;
 fn main() {    
     let mut system = atlas_core::init("Atlas Engine");
 
-    let (vertices, normals, faces) = load_gltf();
-
-    let vertex_buffer =
-        CpuAccessibleBuffer::from_iter(system.device.clone(), BufferUsage::all(), false, vertices)
-            .unwrap();
-    let normals_buffer =
-        CpuAccessibleBuffer::from_iter(system.device.clone(), BufferUsage::all(), false, normals).unwrap();
-    let index_buffer =
-        CpuAccessibleBuffer::from_iter(system.device.clone(), BufferUsage::all(), false, faces).unwrap();
+    let mesh = load_gltf(&system);
 
     let uniform_buffer = CpuBufferPool::<vs_mod::ty::Data>::new(system.device.clone(), BufferUsage::all());
 
@@ -77,6 +69,8 @@ fn main() {
     let rotation_start = Instant::now();
 
     let (egui_ctx, mut egui_winit, mut egui_painter) = get_egui_context(&system, &render_pass);
+
+    let mut camera = construct_camera();
 
     system.event_loop.run(move |event, _, control_flow| {
         match event {
@@ -134,28 +128,14 @@ fn main() {
 
                     // note: this teapot was meant for OpenGL where the origin is at the lower left
                     //       instead the origin is at the upper left in Vulkan, so we reverse the Y axis
-                    let aspect_ratio =
-                    system.swapchain.image_extent()[0] as f32 / system.swapchain.image_extent()[1] as f32;
-                    let proj = cgmath::perspective(
-                        Rad(std::f32::consts::FRAC_PI_2),
-                        aspect_ratio,
-                        0.01,
-                        100.0,
-                    );
-                    let view = Matrix4::look_at_rh(
-                        Point3::new(0.3, 0.3, 1.0),
-                        Point3::new(0.0, 0.0, 0.0),
-                        Vector3::new(0.0, -1.0, 0.0),
-                    );
-                    let scale = Matrix4::from_scale(0.25);
-                    let view_scaled = view * scale;
-                    let world = Matrix4::from(rotation);
+                    camera.aspect_ratio = system.swapchain.image_extent()[0] as f32 / system.swapchain.image_extent()[1] as f32;
+                    camera.update(rotation);
 
                     let uniform_data = vs_mod::ty::Data {
-                        world_view: (view_scaled * world).into(),
-                        world: world.into(),
-                        view: view_scaled.into(),
-                        proj: proj.into(),
+                        world_view: camera.world_view.into(),
+                        world: camera.world.into(),
+                        view: camera.view.into(),
+                        proj: camera.proj.into(),
                     };
 
                     uniform_buffer.next(uniform_data).unwrap()
@@ -206,9 +186,9 @@ fn main() {
                         0,
                         set.clone(),
                     )
-                    .bind_vertex_buffers(0, (vertex_buffer.clone(), normals_buffer.clone()))
-                    .bind_index_buffer(index_buffer.clone())
-                    .draw_indexed(index_buffer.len() as u32, 1, 0, 0, 0)
+                    .bind_vertex_buffers(0, (mesh.vertex_buffer.clone(), mesh.normal_buffer.clone()))
+                    .bind_index_buffer(mesh.index_buffer.clone())
+                    .draw_indexed(mesh.index_buffer.len() as u32, 1, 0, 0, 0)
                     .unwrap();
 
 
