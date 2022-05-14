@@ -33,6 +33,7 @@ use self::mesh::{Normal, Vertex};
 pub mod camera;
 pub mod egui;
 pub mod mesh;
+pub mod texture;
 
 pub struct System {
     pub event_loop: EventLoop<()>,

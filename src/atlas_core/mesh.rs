@@ -1,10 +1,17 @@
+use crate::atlas_core::texture::load_png;
 use crate::atlas_core::System;
 use crate::CpuAccessibleBuffer;
 use bytemuck::{Pod, Zeroable};
 use russimp::scene::{PostProcess, Scene};
+use russimp::texture::DataContent;
 use std::sync::Arc;
 use vulkano::buffer::BufferUsage;
+use vulkano::command_buffer::CommandBufferExecFuture;
+use vulkano::command_buffer::PrimaryAutoCommandBuffer;
+use vulkano::image::view::ImageView;
+use vulkano::image::ImmutableImage;
 use vulkano::impl_vertex;
+use vulkano::sync::NowFuture;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
@@ -35,10 +42,21 @@ pub struct MeshBuffer {
     pub normal_buffer: Arc<CpuAccessibleBuffer<[Normal]>>,
     pub index_buffer: Arc<CpuAccessibleBuffer<[u32]>>,
     pub tex_coord_buffer: Option<Arc<CpuAccessibleBuffer<[TexCoord]>>>,
+    pub material_index: u32,
+}
+
+pub struct Texture {
+    pub image: Arc<ImageView<ImmutableImage>>,
+    pub future: CommandBufferExecFuture<NowFuture, PrimaryAutoCommandBuffer>,
+}
+
+pub struct Material {
+    pub textures: Vec<Texture>,
 }
 
 pub struct Mesh {
     pub mesh_buffers: Vec<MeshBuffer>,
+    pub materials: Vec<Material>,
 }
 
 pub fn load_gltf(system: &System) -> Mesh {
@@ -53,7 +71,27 @@ pub fn load_gltf(system: &System) -> Mesh {
     )
     .expect("Could not load model");
 
+    let mut materials: Vec<Material> = vec![];
     let mut mesh_buffers: Vec<MeshBuffer> = vec![];
+
+    for assimp_material in &scene.materials {
+        let mut textures: Vec<Texture> = vec![];
+
+        for assimp_texture in &assimp_material.textures {
+            let texture_info = &assimp_texture.1[0];
+            assert_eq!(
+                texture_info.ach_format_hint, "png",
+                "Encompassed texture data should be in png format"
+            );
+
+            let texture = match texture_info.data.as_ref().expect("Unexpected texture data") {
+                DataContent::Texel(_) => panic!("Loading textures by texels is not yet supported"),
+                DataContent::Bytes(bytes) => load_png(&system.queue, bytes),
+            };
+            textures.push(texture);
+        }
+        materials.push(Material { textures });
+    }
 
     for mesh in &scene.meshes {
         let assimp_vertices = &mesh.vertices;
@@ -127,8 +165,12 @@ pub fn load_gltf(system: &System) -> Mesh {
             normal_buffer,
             index_buffer,
             tex_coord_buffer,
+            material_index: mesh.material_index,
         });
     }
 
-    Mesh { mesh_buffers }
+    Mesh {
+        mesh_buffers,
+        materials,
+    }
 }
