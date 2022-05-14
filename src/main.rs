@@ -4,8 +4,6 @@ use atlas_core::{
     egui::{get_egui_context, render_egui, update_textures_egui, FrameEndFuture},
     mesh::load_gltf,
 };
-use cgmath::{Matrix3, Rad};
-use std::time::Instant;
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer, CpuBufferPool, TypedBufferAccess},
     command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, SubpassContents},
@@ -72,9 +70,7 @@ fn main() {
         &mut viewport,
     );
     let mut recreate_swapchain = false;
-
     let mut previous_frame_end = Some(FrameEndFuture::now(system.device.clone()));
-    let rotation_start = Instant::now();
 
     let (egui_ctx, mut egui_winit, mut egui_painter) = get_egui_context(&system, &render_pass);
 
@@ -135,14 +131,9 @@ fn main() {
                 }
 
                 let uniform_buffer_subbuffer = {
-                    let elapsed = rotation_start.elapsed();
-                    let rotation =
-                        elapsed.as_secs() as f64 + elapsed.subsec_nanos() as f64 / 1_000_000_000.0;
-                    let rotation = Matrix3::from_angle_y(Rad(rotation as f32));
-
                     let extent = system.swapchain.image_extent();
                     camera.aspect_ratio = extent[0] as f32 / extent[1] as f32;
-                    camera.update(rotation);
+                    camera.update();
 
                     let uniform_data = vs_mod::ty::Data {
                         world_view: camera.world_view.into(),
@@ -204,14 +195,21 @@ fn main() {
                         pipeline.layout().clone(),
                         0,
                         set.clone(),
-                    )
-                    .bind_vertex_buffers(
-                        0,
-                        (mesh.vertex_buffer.clone(), mesh.normal_buffer.clone()),
-                    )
-                    .bind_index_buffer(mesh.index_buffer.clone())
-                    .draw_indexed(mesh.index_buffer.len() as u32, 1, 0, 0, 0)
-                    .unwrap();
+                    );
+
+                for mesh_buffer in &mesh.mesh_buffers {
+                    builder
+                        .bind_vertex_buffers(
+                            0,
+                            (
+                                mesh_buffer.vertex_buffer.clone(),
+                                mesh_buffer.normal_buffer.clone(),
+                            ),
+                        )
+                        .bind_index_buffer(mesh_buffer.index_buffer.clone())
+                        .draw_indexed(mesh_buffer.index_buffer.len() as u32, 1, 0, 0, 0)
+                        .unwrap();
+                }
 
                 render_egui(
                     &mut builder,

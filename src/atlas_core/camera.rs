@@ -24,17 +24,16 @@ pub struct Camera {
 }
 
 impl Camera {
-    pub fn update(&mut self, rotation: Matrix3<f32>) {
+    pub fn update(&mut self) {
         self.proj = cgmath::perspective(
             Rad(std::f32::consts::FRAC_PI_2),
             self.aspect_ratio,
-            0.1,
-            1000.0,
+            1.0,
+            10000.0,
         );
 
         self.view = Matrix4::look_to_rh(self.position, self.forward, self.up);
-
-        self.world = Matrix4::from(rotation);
+        self.world = Matrix4::from_scale(1.0);
         self.world_view = self.view * self.world;
     }
 }
@@ -65,8 +64,12 @@ pub trait CameraInputLogic {
 
 impl CameraInputLogic for Camera {
     fn handle_event(&mut self, input: &WinitInputHelper) {
-        let move_speed = 0.1; // 1 / dt
-        let rotate_speed = 0.01; // rad / (px * dt)
+        let mut move_speed = 1.0; // 1 / dt
+        let rotate_speed = 0.005; // rad / (px * dt)
+
+        if input.held_shift() {
+            move_speed *= 5.0;
+        }
 
         if input.key_held(VirtualKeyCode::W) {
             self.position += self.forward * move_speed;
