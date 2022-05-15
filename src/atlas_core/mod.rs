@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Instant;
 use vulkano::{
     device::{
         physical::{PhysicalDevice, PhysicalDeviceType},
@@ -35,7 +36,18 @@ pub mod egui;
 pub mod mesh;
 pub mod texture;
 
+pub struct PerformanceInfo {
+    pub game_start: Instant,
+    pub delta_time_ms: f32,
+}
+
+pub struct SystemInfo {
+    pub device_name: String,
+    pub device_type: String,
+}
+
 pub struct System {
+    pub info: SystemInfo,
     pub event_loop: EventLoop<()>,
     pub device: Arc<Device>,
     pub swapchain: Arc<Swapchain<Window>>,
@@ -80,11 +92,7 @@ pub fn init(title: &str) -> System {
         })
         .unwrap();
 
-    println!(
-        "Using device: {} (type: {:?})",
-        physical_device.properties().device_name,
-        physical_device.properties().device_type,
-    );
+    let systtem_properties = physical_device.properties();
 
     let (device, mut queues) = Device::new(
         physical_device,
@@ -125,6 +133,10 @@ pub fn init(title: &str) -> System {
     };
 
     System {
+        info: SystemInfo {
+            device_name: systtem_properties.device_name.clone(),
+            device_type: format!("{:?}", systtem_properties.device_type),
+        },
         event_loop,
         device,
         swapchain,

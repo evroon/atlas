@@ -1,3 +1,4 @@
+use crate::atlas_core::SystemInfo;
 use std::sync::Arc;
 
 use egui::{epaint::ClippedShape, TextStyle};
@@ -12,7 +13,7 @@ use vulkano::{
 };
 use winit::window::Window;
 
-use super::System;
+use super::{PerformanceInfo, System};
 
 pub enum FrameEndFuture<F: GpuFuture + 'static> {
     FenceSignalFuture(FenceSignalFuture<F>),
@@ -66,6 +67,8 @@ pub fn get_egui_context(
 }
 
 pub fn update_textures_egui(
+    performance_info: &PerformanceInfo,
+    system_info: &SystemInfo,
     builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
     surface: &Arc<Surface<Window>>,
     egui_ctx: &egui::Context,
@@ -74,8 +77,13 @@ pub fn update_textures_egui(
 ) -> (Vec<ClippedShape>, bool) {
     egui_ctx.begin_frame(egui_winit.take_egui_input(surface.window()));
 
-    egui::Window::new("Settings").show(&egui_ctx, |ui| {
-        egui_ctx.settings_ui(ui);
+    egui::Window::new("Monitoring").show(&egui_ctx, |ui| {
+        ui.label(system_info.device_name.clone());
+        ui.label(system_info.device_type.clone());
+        ui.label(format!(
+            "delta time: {:.2} ms",
+            performance_info.delta_time_ms
+        ));
     });
 
     // Get the shapes from egui

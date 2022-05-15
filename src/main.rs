@@ -3,7 +3,9 @@ use atlas_core::{
     camera::construct_camera,
     egui::{get_egui_context, render_egui, update_textures_egui, FrameEndFuture},
     mesh::load_gltf,
+    PerformanceInfo,
 };
+use std::time::Instant;
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer, CpuBufferPool, TypedBufferAccess},
     command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, SubpassContents},
@@ -69,6 +71,7 @@ fn main() {
         render_pass.clone(),
         &mut viewport,
     );
+
     let mut recreate_swapchain = false;
     let mut previous_frame_end = Some(FrameEndFuture::now(system.device.clone()));
 
@@ -76,6 +79,14 @@ fn main() {
 
     let mut camera = construct_camera();
     let mut input = WinitInputHelper::new();
+
+    let game_start = Instant::now();
+    let mut last_update = Instant::now();
+
+    let mut performance_info = PerformanceInfo {
+        game_start,
+        delta_time_ms: 0.0,
+    };
 
     system.event_loop.run(move |event, _, control_flow| {
         if input.update(&event) {
@@ -131,6 +142,10 @@ fn main() {
                 }
 
                 let uniform_buffer_subbuffer = {
+                    performance_info.delta_time_ms =
+                        (Instant::now() - last_update).as_secs_f32() * 1000.0;
+                    last_update = Instant::now();
+
                     let extent = system.swapchain.image_extent();
                     camera.aspect_ratio = extent[0] as f32 / extent[1] as f32;
                     camera.update();
@@ -174,6 +189,8 @@ fn main() {
                 .unwrap();
 
                 let (shapes, wait_for_last_frame) = update_textures_egui(
+                    &performance_info,
+                    &system.info,
                     &mut builder,
                     &system.surface,
                     &egui_ctx,
