@@ -28,7 +28,7 @@ impl Camera {
         self.proj = cgmath::perspective(
             Rad(std::f32::consts::FRAC_PI_2),
             self.aspect_ratio,
-            1.0,
+            5.0,
             10000.0,
         );
 
@@ -43,7 +43,7 @@ pub fn construct_camera() -> Camera {
     //       In Vulkan, the origin is at the upper left,
     //       so we have to reverse the Y axis
     let forward = Vector3::new(0.0, 0.0, 1.0);
-    let up = Vector3::new(0.0, -1.0, 0.0);
+    let up = Vector3::new(0.0, 1.0, 0.0);
     Camera {
         position: Point3::new(0.0, 0.0, -3.0),
         forward,
@@ -100,7 +100,13 @@ impl CameraInputLogic for Camera {
                 * Matrix3::from_axis_angle(self.right, Rad(diff.1 * rotate_speed));
 
             self.forward = transform * self.forward;
-            self.up = transform * self.up;
+
+            if input.held_control() {
+                self.up = transform * self.up;
+            } else {
+                self.up = Vector3::unit_y();
+            }
+
             self.right = self.forward.cross(self.up);
         }
     }
