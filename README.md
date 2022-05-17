@@ -4,7 +4,9 @@
 
 [![preview](https://raw.githubusercontent.com/evroon/atlas/master/etc/preview.png)](https://github.com/evroon/atlas/tree/master/etc/preview.png)
 
-A graphics engine using Vulkan written in Rust using [Vulkano](https://github.com/vulkano-rs/vulkano).
+A Vulkan graphics engine written in Rust using [Vulkano](https://github.com/vulkano-rs/vulkano).
+
+*Preview image is rendered using Crytek's version of the Sponza atrium model (by Marko Dabrovic)*
 
 # Features
 * Display UI with egui
