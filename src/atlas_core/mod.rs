@@ -1,12 +1,7 @@
 use std::sync::Arc;
 use std::time::Instant;
-use vulkano::descriptor_set::layout::DescriptorSetLayout;
-use vulkano::descriptor_set::layout::DescriptorSetLayoutCreateInfo;
-use vulkano::descriptor_set::layout::DescriptorSetLayoutCreationError;
 use vulkano::device::Features;
 use vulkano::pipeline::graphics::color_blend::ColorBlendState;
-use vulkano::pipeline::layout::PipelineLayoutCreateInfo;
-use vulkano::pipeline::PipelineLayout;
 use vulkano::{
     device::{
         physical::{PhysicalDevice, PhysicalDeviceType},

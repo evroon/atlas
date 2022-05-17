@@ -16,7 +16,6 @@ use vulkano::descriptor_set::layout::DescriptorSetLayout;
 use vulkano::image::view::ImageView;
 use vulkano::image::ImmutableImage;
 use vulkano::impl_vertex;
-use vulkano::sync::now;
 use vulkano::sync::NowFuture;
 
 #[repr(C)]
@@ -57,7 +56,6 @@ pub struct Texture {
 }
 
 pub struct Material {
-    pub textures: Vec<Texture>,
     pub uniform_set: Option<Arc<PersistentDescriptorSet>>,
 }
 
@@ -66,18 +64,20 @@ pub struct Mesh {
     pub materials: Vec<Material>,
 }
 
+fn load_default_texture(system: &System) -> Texture {
+    load_png_file(&system.queue, "assets/models/sponza/textures/test.png")
+}
+
 pub fn load_material(
     system: &System,
     layout: &Arc<DescriptorSetLayout>,
     assimp_material: &russimp::material::Material,
 ) -> Material {
-    let mut textures: Vec<Texture> = vec![];
-    let default_texture = load_png_file(&system.queue, "assets/models/sponza/textures/test.png");
     let base_textures = assimp_material.textures.get(&TextureType::BaseColor);
 
     let result_tex = if base_textures.is_some() {
         let assimp_texture = &base_textures.unwrap().first().unwrap();
-        
+
         assert_eq!(
             assimp_texture.ach_format_hint, "png",
             "Encompassed texture data should be in png format"
@@ -98,12 +98,11 @@ pub fn load_material(
     };
 
     let uniform_set = match result_tex {
-        None => get_descriptor_set(system, layout, default_texture),
+        None => get_descriptor_set(system, layout, load_default_texture(system)),
         Some(x) => get_descriptor_set(system, layout, x),
     };
 
     Material {
-        textures,
         uniform_set: Some(uniform_set),
     }
 }
@@ -122,10 +121,6 @@ pub fn load_gltf(system: &System, layout: &Arc<DescriptorSetLayout>) -> Mesh {
 
     let materials: Vec<Material> = vec![];
     let mut mesh_buffers: Vec<MeshBuffer> = vec![];
-    let default_textures: Vec<Texture> = vec![load_png_file(
-        &system.queue,
-        "assets/models/sponza/textures/test.png",
-    )];
 
     for mesh in &scene.meshes {
         let assimp_vertices = &mesh.vertices;
@@ -136,7 +131,6 @@ pub fn load_gltf(system: &System, layout: &Arc<DescriptorSetLayout>) -> Mesh {
             system,
             layout,
             scene.materials.get(mesh.material_index as usize).unwrap(),
-            &default_textures,
         );
 
         let vertices: Vec<Vertex> = assimp_vertices
