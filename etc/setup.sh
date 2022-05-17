@@ -1,7 +1,8 @@
 #!/bin/bash
 
 # Install egui dependencies
-sudo apt install -y libclang-dev libgtk-3-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libspeechd-dev libxkbcommon-dev
+sudo apt-get update
+sudo apt-get install -y libclang-dev libgtk-3-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libspeechd-dev libxkbcommon-dev libssl-dev libgtk-3-dev
 
 # Install assimp from source
 path_apt_sourcelist=/etc/apt/sources.list
@@ -12,7 +13,7 @@ if ! grep -q "apt.llvm.org" ${path_apt_sourcelist}; then
 	bash -c "$(wget -O - https://apt.llvm.org/llvm.sh)"
 fi
 
-sudo apt install -y git cmake ninja-build clang-11
+sudo apt-get install -y git cmake ninja-build clang-11
 
 if [ ! -d ${path_assimp_repo} ]; then
 	git clone --depth 1 --branch v5.1.0 https://github.com/assimp/assimp.git ${path_assimp_repo}
