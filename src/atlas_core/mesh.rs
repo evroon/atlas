@@ -77,7 +77,7 @@ pub fn load_material(
 
     let result_tex = if base_textures.is_some() {
         let assimp_texture = &base_textures.unwrap().first().unwrap();
-        println!("{:?}", assimp_texture);
+        
         assert_eq!(
             assimp_texture.ach_format_hint, "png",
             "Encompassed texture data should be in png format"

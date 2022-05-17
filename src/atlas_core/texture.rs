@@ -41,15 +41,7 @@ pub fn load_png(queue: &Arc<Queue>, data: &Vec<u8>) -> Texture {
             .flatten()
             .collect()
     };
-    println!("img {}", image_data_alpha[0]);
-    println!(
-        "{} {} {} {:?}",
-        width,
-        height,
-        image_data_alpha.len(),
-        color_type
-    );
-
+    
     let (image, future) = ImmutableImage::from_iter(
         image_data_alpha,
         ImageDimensions::Dim2d {
