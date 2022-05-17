@@ -25,9 +25,6 @@ mod atlas_core;
 
 fn main() {
     let mut system = atlas_core::init("Atlas Engine");
-
-    let mesh = load_gltf(&system);
-
     let uniform_buffer =
         CpuBufferPool::<vs_mod::ty::Data>::new(system.device.clone(), BufferUsage::all());
 
@@ -87,6 +84,9 @@ fn main() {
         game_start,
         delta_time_ms: 0.0,
     };
+
+    let layout = pipeline.layout().set_layouts().get(1).unwrap();
+    let mesh = load_gltf(&system, layout);
 
     system.event_loop.run(move |event, _, control_flow| {
         if input.update(&event) {
@@ -161,7 +161,7 @@ fn main() {
                 };
 
                 let layout = pipeline.layout().set_layouts().get(0).unwrap();
-                let set = PersistentDescriptorSet::new(
+                let general_set = PersistentDescriptorSet::new(
                     layout.clone(),
                     [WriteDescriptorSet::buffer(0, uniform_buffer_subbuffer)],
                 )
@@ -206,23 +206,25 @@ fn main() {
                     )
                     .unwrap()
                     .set_viewport(0, [viewport.clone()])
-                    .bind_pipeline_graphics(pipeline.clone())
-                    .bind_descriptor_sets(
-                        PipelineBindPoint::Graphics,
-                        pipeline.layout().clone(),
-                        0,
-                        set.clone(),
-                    );
+                    .bind_pipeline_graphics(pipeline.clone());
 
                 for mesh_buffer in &mesh.mesh_buffers {
+                    let vertex_buffers = (
+                        mesh_buffer.vertex_buffer.clone(),
+                        mesh_buffer.normal_buffer.clone(),
+                        mesh_buffer.tex_coord_buffer.clone(),
+                    );
+
+                    let uniform_set = mesh_buffer.material.uniform_set.as_ref().unwrap();
+
                     builder
-                        .bind_vertex_buffers(
+                        .bind_descriptor_sets(
+                            PipelineBindPoint::Graphics,
+                            pipeline.layout().clone(),
                             0,
-                            (
-                                mesh_buffer.vertex_buffer.clone(),
-                                mesh_buffer.normal_buffer.clone(),
-                            ),
+                            vec![general_set.clone(), uniform_set.clone()],
                         )
+                        .bind_vertex_buffers(0, vertex_buffers)
                         .bind_index_buffer(mesh_buffer.index_buffer.clone())
                         .draw_indexed(mesh_buffer.index_buffer.len() as u32, 1, 0, 0, 0)
                         .unwrap();

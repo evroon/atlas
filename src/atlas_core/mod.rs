@@ -1,5 +1,12 @@
 use std::sync::Arc;
 use std::time::Instant;
+use vulkano::descriptor_set::layout::DescriptorSetLayout;
+use vulkano::descriptor_set::layout::DescriptorSetLayoutCreateInfo;
+use vulkano::descriptor_set::layout::DescriptorSetLayoutCreationError;
+use vulkano::device::Features;
+use vulkano::pipeline::graphics::color_blend::ColorBlendState;
+use vulkano::pipeline::layout::PipelineLayoutCreateInfo;
+use vulkano::pipeline::PipelineLayout;
 use vulkano::{
     device::{
         physical::{PhysicalDevice, PhysicalDeviceType},
@@ -29,7 +36,7 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
-use self::mesh::{Normal, Vertex};
+use self::mesh::{Normal, TexCoord, Vertex};
 
 pub mod camera;
 pub mod egui;
@@ -100,6 +107,13 @@ pub fn init(title: &str) -> System {
             enabled_extensions: physical_device
                 .required_extensions()
                 .union(&device_extensions),
+            enabled_features: Features {
+                descriptor_indexing: true,
+                shader_uniform_buffer_array_non_uniform_indexing: true,
+                runtime_descriptor_array: true,
+                descriptor_binding_variable_descriptor_count: true,
+                ..Features::none()
+            },
             queue_create_infos: vec![QueueCreateInfo::family(queue_family)],
             ..Default::default()
         },
@@ -177,23 +191,56 @@ pub fn window_size_dependent_setup(
         })
         .collect::<Vec<_>>();
 
-    // In the triangle example we use a dynamic viewport, as its a simple example.
-    // However in the teapot example, we recreate the pipelines with a hardcoded viewport instead.
-    // This allows the driver to optimize things, at the cost of slower window resizes.
-    // https://computergraphics.stackexchange.com/questions/5742/vulkan-best-way-of-updating-pipeline-viewport
+    let vertex_input_state = BuffersDefinition::new()
+        .vertex::<Vertex>()
+        .vertex::<Normal>()
+        .vertex::<TexCoord>();
+
+    // let pipeline_layout = {
+    //     let mut layout_create_infos: Vec<_> = DescriptorSetLayoutCreateInfo::from_requirements(
+    //         fs.entry_point("main").unwrap().descriptor_requirements(),
+    //     );
+
+    //     // Set 0, Binding 0
+    //     let binding = layout_create_infos[0].bindings.get_mut(&0).unwrap();
+    //     binding.variable_descriptor_count = true;
+    //     binding.descriptor_count = 1;
+
+    //     let set_layouts = layout_create_infos
+    //         .into_iter()
+    //         .map(|desc| Ok(DescriptorSetLayout::new(device.clone(), desc.clone())?))
+    //         .collect::<Result<Vec<_>, DescriptorSetLayoutCreationError>>()
+    //         .unwrap();
+
+    //     PipelineLayout::new(
+    //         device.clone(),
+    //         PipelineLayoutCreateInfo {
+    //             set_layouts,
+    //             push_constant_ranges: fs
+    //                 .entry_point("main")
+    //                 .unwrap()
+    //                 .push_constant_requirements()
+    //                 .cloned()
+    //                 .into_iter()
+    //                 .collect(),
+    //             ..Default::default()
+    //         },
+    //     )
+    //     .unwrap()
+    // };
+
+    let subpass = Subpass::from(render_pass.clone(), 0).unwrap();
     let pipeline = GraphicsPipeline::start()
-        .vertex_input_state(
-            BuffersDefinition::new()
-                .vertex::<Vertex>()
-                .vertex::<Normal>(),
-        )
+        .vertex_input_state(vertex_input_state)
         .vertex_shader(vs.entry_point("main").unwrap(), ())
         .input_assembly_state(InputAssemblyState::new())
         .viewport_state(ViewportState::viewport_dynamic_scissor_irrelevant())
         .fragment_shader(fs.entry_point("main").unwrap(), ())
+        .color_blend_state(ColorBlendState::new(subpass.num_color_attachments()).blend_alpha())
         .depth_stencil_state(DepthStencilState::simple_depth_test())
-        .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
+        .render_pass(subpass)
         .build(device.clone())
+        // .with_pipeline_layout(device.clone(), pipeline_layout)
         .unwrap();
 
     (pipeline, framebuffers)

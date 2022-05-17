@@ -2,8 +2,10 @@
 
 layout(location = 0) in vec3 position;
 layout(location = 1) in vec3 normal;
+layout(location = 2) in vec2 tex_coord;
 
 layout(location = 0) out vec3 v_normal;
+layout(location = 1) out vec2 out_coords;
 
 layout(set = 0, binding = 0) uniform Data {
     mat4 world_view;
@@ -13,6 +15,7 @@ layout(set = 0, binding = 0) uniform Data {
 } uniforms;
 
 void main() {
-    v_normal = transpose(inverse(mat3(uniforms.world_view))) * normal;
+    out_coords = tex_coord;
+    v_normal = normal;
     gl_Position = uniforms.proj * uniforms.world_view * vec4(position, 1.0);
 }

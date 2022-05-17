@@ -1,16 +1,22 @@
+use crate::atlas_core::texture::get_descriptor_set;
 use crate::atlas_core::texture::load_png;
+use crate::atlas_core::texture::load_png_file;
 use crate::atlas_core::System;
 use crate::CpuAccessibleBuffer;
+use crate::PersistentDescriptorSet;
 use bytemuck::{Pod, Zeroable};
 use russimp::scene::{PostProcess, Scene};
 use russimp::texture::DataContent;
+use russimp::texture::TextureType;
 use std::sync::Arc;
 use vulkano::buffer::BufferUsage;
 use vulkano::command_buffer::CommandBufferExecFuture;
 use vulkano::command_buffer::PrimaryAutoCommandBuffer;
+use vulkano::descriptor_set::layout::DescriptorSetLayout;
 use vulkano::image::view::ImageView;
 use vulkano::image::ImmutableImage;
 use vulkano::impl_vertex;
+use vulkano::sync::now;
 use vulkano::sync::NowFuture;
 
 #[repr(C)]
@@ -32,17 +38,17 @@ impl_vertex!(Normal, normal);
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
 pub struct TexCoord {
-    pub coordinate: [f32; 2],
+    pub tex_coord: [f32; 2],
 }
 
-impl_vertex!(TexCoord, coordinate);
+impl_vertex!(TexCoord, tex_coord);
 
 pub struct MeshBuffer {
     pub vertex_buffer: Arc<CpuAccessibleBuffer<[Vertex]>>,
     pub normal_buffer: Arc<CpuAccessibleBuffer<[Normal]>>,
     pub index_buffer: Arc<CpuAccessibleBuffer<[u32]>>,
-    pub tex_coord_buffer: Option<Arc<CpuAccessibleBuffer<[TexCoord]>>>,
-    pub material_index: u32,
+    pub tex_coord_buffer: Arc<CpuAccessibleBuffer<[TexCoord]>>,
+    pub material: Material,
 }
 
 pub struct Texture {
@@ -52,6 +58,7 @@ pub struct Texture {
 
 pub struct Material {
     pub textures: Vec<Texture>,
+    pub uniform_set: Option<Arc<PersistentDescriptorSet>>,
 }
 
 pub struct Mesh {
@@ -59,7 +66,49 @@ pub struct Mesh {
     pub materials: Vec<Material>,
 }
 
-pub fn load_gltf(system: &System) -> Mesh {
+pub fn load_material(
+    system: &System,
+    layout: &Arc<DescriptorSetLayout>,
+    assimp_material: &russimp::material::Material,
+) -> Material {
+    let mut textures: Vec<Texture> = vec![];
+    let default_texture = load_png_file(&system.queue, "assets/models/sponza/textures/test.png");
+    let base_textures = assimp_material.textures.get(&TextureType::BaseColor);
+
+    let result_tex = if base_textures.is_some() {
+        let assimp_texture = &base_textures.unwrap().first().unwrap();
+        println!("{:?}", assimp_texture);
+        assert_eq!(
+            assimp_texture.ach_format_hint, "png",
+            "Encompassed texture data should be in png format"
+        );
+
+        let texture = match assimp_texture
+            .data
+            .as_ref()
+            .expect("Unexpected texture data")
+        {
+            DataContent::Texel(_) => panic!("Loading textures by texels is not yet supported"),
+            DataContent::Bytes(bytes) => load_png(&system.queue, bytes),
+        };
+
+        Some(texture)
+    } else {
+        None
+    };
+
+    let uniform_set = match result_tex {
+        None => get_descriptor_set(system, layout, default_texture),
+        Some(x) => get_descriptor_set(system, layout, x),
+    };
+
+    Material {
+        textures,
+        uniform_set: Some(uniform_set),
+    }
+}
+
+pub fn load_gltf(system: &System, layout: &Arc<DescriptorSetLayout>) -> Mesh {
     let scene = Scene::from_file(
         "assets/models/sponza/sponza.glb",
         vec![
@@ -71,33 +120,24 @@ pub fn load_gltf(system: &System) -> Mesh {
     )
     .expect("Could not load model");
 
-    let mut materials: Vec<Material> = vec![];
+    let materials: Vec<Material> = vec![];
     let mut mesh_buffers: Vec<MeshBuffer> = vec![];
-
-    for assimp_material in &scene.materials {
-        let mut textures: Vec<Texture> = vec![];
-
-        for assimp_texture in &assimp_material.textures {
-            let texture_info = &assimp_texture.1[0];
-            assert_eq!(
-                texture_info.ach_format_hint, "png",
-                "Encompassed texture data should be in png format"
-            );
-
-            let texture = match texture_info.data.as_ref().expect("Unexpected texture data") {
-                DataContent::Texel(_) => panic!("Loading textures by texels is not yet supported"),
-                DataContent::Bytes(bytes) => load_png(&system.queue, bytes),
-            };
-            textures.push(texture);
-        }
-        materials.push(Material { textures });
-    }
+    let default_textures: Vec<Texture> = vec![load_png_file(
+        &system.queue,
+        "assets/models/sponza/textures/test.png",
+    )];
 
     for mesh in &scene.meshes {
         let assimp_vertices = &mesh.vertices;
         let assimp_normals = &mesh.normals;
         let assimp_faces = &mesh.faces;
         let assimp_tex_coords = &mesh.texture_coords;
+        let material = load_material(
+            system,
+            layout,
+            scene.materials.get(mesh.material_index as usize).unwrap(),
+            &default_textures,
+        );
 
         let vertices: Vec<Vertex> = assimp_vertices
             .iter()
@@ -117,26 +157,18 @@ pub fn load_gltf(system: &System) -> Mesh {
             .flatten()
             .collect();
 
-        let mut tex_coord_buffer: Option<Arc<CpuAccessibleBuffer<[TexCoord]>>> = None;
-
-        if assimp_tex_coords.into_iter().all(|x| (x).is_some()) {
-            let tex_coords: Vec<TexCoord> = assimp_tex_coords
-                .iter()
-                .map(|tc| tc.as_ref().unwrap()[0])
-                .map(|tc| TexCoord {
-                    coordinate: [tc.x, tc.y],
-                })
-                .collect();
-            tex_coord_buffer = Some(
-                CpuAccessibleBuffer::from_iter(
-                    system.device.clone(),
-                    BufferUsage::all(),
-                    false,
-                    tex_coords,
-                )
-                .unwrap(),
-            );
+        if assimp_tex_coords[0].is_none() {
+            panic!("Could not find texture coordinates");
         }
+
+        let tex_coords: Vec<TexCoord> = assimp_tex_coords[0]
+            .as_ref()
+            .unwrap()
+            .into_iter()
+            .map(|tc| TexCoord {
+                tex_coord: [tc.x, 1.0 - tc.y],
+            })
+            .collect();
 
         let vertex_buffer = CpuAccessibleBuffer::from_iter(
             system.device.clone(),
@@ -159,13 +191,20 @@ pub fn load_gltf(system: &System) -> Mesh {
             indices,
         )
         .unwrap();
+        let tex_coord_buffer = CpuAccessibleBuffer::from_iter(
+            system.device.clone(),
+            BufferUsage::all(),
+            false,
+            tex_coords,
+        )
+        .unwrap();
 
         mesh_buffers.push(MeshBuffer {
             vertex_buffer,
             normal_buffer,
             index_buffer,
             tex_coord_buffer,
-            material_index: mesh.material_index,
+            material,
         });
     }
 
