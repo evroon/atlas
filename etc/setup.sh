@@ -16,7 +16,7 @@ fi
 sudo apt-get install -y git cmake ninja-build clang-11
 
 if [ ! -d ${path_assimp_repo} ]; then
-	git clone --depth 1 --branch v5.1.0 https://github.com/assimp/assimp.git ${path_assimp_repo}
+	git clone --depth 1 --branch v5.2.4 https://github.com/assimp/assimp.git ${path_assimp_repo}
 fi
 
 if [ ! -d ${path_assimp_build} ]; then

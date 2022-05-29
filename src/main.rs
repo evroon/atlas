@@ -3,14 +3,17 @@ use atlas_core::{
     camera::construct_camera,
     egui::{get_egui_context, render_egui, update_textures_egui, FrameEndFuture},
     mesh::load_gltf,
+    renderer::{
+        deferred::{self, deferred_vert_mod},
+        triangle_draw_system::TriangleDrawSystem,
+    },
     PerformanceInfo,
 };
 use std::time::Instant;
 use vulkano::{
-    buffer::{BufferUsage, CpuAccessibleBuffer, CpuBufferPool, TypedBufferAccess},
+    buffer::{BufferUsage, CpuAccessibleBuffer, CpuBufferPool},
     command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, SubpassContents},
     descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet},
-    format::Format,
     pipeline::{graphics::viewport::Viewport, Pipeline, PipelineBindPoint},
     swapchain::{acquire_next_image, AcquireError, SwapchainCreateInfo, SwapchainCreationError},
     sync::{FlushError, GpuFuture},
@@ -25,34 +28,10 @@ mod atlas_core;
 
 fn main() {
     let mut system = atlas_core::init("Atlas Engine");
-    let uniform_buffer =
-        CpuBufferPool::<vs_mod::ty::Data>::new(system.device.clone(), BufferUsage::all());
-
-    let vs = vs_mod::load(system.device.clone()).unwrap();
-    let fs = fs_mod::load(system.device.clone()).unwrap();
-
-    let render_pass = vulkano::ordered_passes_renderpass!(
+    let uniform_buffer = CpuBufferPool::<deferred_vert_mod::ty::Data>::new(
         system.device.clone(),
-        attachments: {
-            color: {
-                load: Clear,
-                store: Store,
-                format: system.swapchain.image_format(),
-                samples: 1,
-            },
-            depth: {
-                load: Clear,
-                store: DontCare,
-                format: Format::D16_UNORM,
-                samples: 1,
-            }
-        },
-        passes: [
-            { color: [color], depth_stencil: {depth}, input: [] }, // default renderpass
-            { color: [color], depth_stencil: {}, input: [] } // egui renderpass
-        ]
-    )
-    .unwrap();
+        BufferUsage::all(),
+    );
 
     let mut viewport = Viewport {
         origin: [0.0, 0.0],
@@ -60,19 +39,19 @@ fn main() {
         depth_range: 0.0..1.0,
     };
 
-    let (mut pipeline, mut framebuffers) = atlas_core::window_size_dependent_setup(
-        system.device.clone(),
-        &vs,
-        &fs,
-        &system.images,
-        render_pass.clone(),
-        &mut viewport,
-    );
+    let (mut framebuffers, mut color_buffer, mut normal_buffer) =
+        atlas_core::window_size_dependent_setup(
+            system.device.clone(),
+            &system.images,
+            system.render_pass.render_pass.clone(),
+            &mut viewport,
+        );
 
     let mut recreate_swapchain = false;
     let mut previous_frame_end = Some(FrameEndFuture::now(system.device.clone()));
 
-    let (egui_ctx, mut egui_winit, mut egui_painter) = get_egui_context(&system, &render_pass);
+    let (egui_ctx, mut egui_winit, mut egui_painter) =
+        get_egui_context(&system, &system.render_pass.render_pass);
 
     let mut camera = construct_camera();
     let mut input = WinitInputHelper::new();
@@ -85,7 +64,12 @@ fn main() {
         delta_time_ms: 0.0,
     };
 
-    let layout = pipeline.layout().set_layouts().get(1).unwrap();
+    let (deferred_pipeline, lighting_pipeline) =
+        deferred::init_pipelines(&system.device, &system.render_pass);
+
+    let triangle_system = TriangleDrawSystem::new(&system.queue);
+
+    let layout = deferred_pipeline.layout().set_layouts().get(1).unwrap();
     let mesh = load_gltf(&system, layout);
 
     system.event_loop.run(move |event, _, control_flow| {
@@ -128,16 +112,17 @@ fn main() {
                         };
 
                     system.swapchain = new_swapchain;
-                    let (new_pipeline, new_framebuffers) = atlas_core::window_size_dependent_setup(
-                        system.device.clone(),
-                        &vs,
-                        &fs,
-                        &new_images,
-                        render_pass.clone(),
-                        &mut viewport,
-                    );
-                    pipeline = new_pipeline;
+                    let (new_framebuffers, new_color_buffer, new_normal_buffer) =
+                        atlas_core::window_size_dependent_setup(
+                            system.device.clone(),
+                            &new_images,
+                            system.render_pass.render_pass.clone(),
+                            &mut viewport,
+                        );
+
                     framebuffers = new_framebuffers;
+                    color_buffer = new_color_buffer;
+                    normal_buffer = new_normal_buffer;
                     recreate_swapchain = false;
                 }
 
@@ -150,7 +135,7 @@ fn main() {
                     camera.aspect_ratio = extent[0] as f32 / extent[1] as f32;
                     camera.update();
 
-                    let uniform_data = vs_mod::ty::Data {
+                    let uniform_data = deferred_vert_mod::ty::Data {
                         world_view: camera.world_view.into(),
                         world: camera.world.into(),
                         view: camera.view.into(),
@@ -160,10 +145,24 @@ fn main() {
                     uniform_buffer.next(uniform_data).unwrap()
                 };
 
-                let layout = pipeline.layout().set_layouts().get(0).unwrap();
-                let general_set = PersistentDescriptorSet::new(
-                    layout.clone(),
-                    [WriteDescriptorSet::buffer(0, uniform_buffer_subbuffer)],
+                let deferred_layout = deferred_pipeline.layout().set_layouts().get(0).unwrap();
+                let deferred_set = PersistentDescriptorSet::new(
+                    deferred_layout.clone(),
+                    [WriteDescriptorSet::buffer(
+                        0,
+                        uniform_buffer_subbuffer.clone(),
+                    )],
+                )
+                .unwrap();
+
+                let lighting_layout = lighting_pipeline.layout().set_layouts().get(0).unwrap();
+                let lighting_set = PersistentDescriptorSet::new(
+                    lighting_layout.clone(),
+                    [
+                        WriteDescriptorSet::image_view(0, color_buffer.clone()),
+                        WriteDescriptorSet::image_view(1, normal_buffer.clone()),
+                        WriteDescriptorSet::buffer(2, uniform_buffer_subbuffer),
+                    ],
                 )
                 .unwrap();
 
@@ -198,37 +197,38 @@ fn main() {
                     &mut egui_winit,
                 );
 
+                let clear_values = vec![
+                    [0.0, 0.0, 0.0, 1.0].into(),
+                    [0.0, 0.0, 0.0, 1.0].into(),
+                    [0.0, 0.0, 0.0, 1.0].into(),
+                    1f32.into(),
+                ];
+
                 builder
                     .begin_render_pass(
                         framebuffers[image_num].clone(),
                         SubpassContents::Inline,
-                        vec![[0.0, 0.0, 1.0, 1.0].into(), 1f32.into()],
+                        clear_values,
                     )
                     .unwrap()
                     .set_viewport(0, [viewport.clone()])
-                    .bind_pipeline_graphics(pipeline.clone());
+                    .bind_pipeline_graphics(deferred_pipeline.clone());
 
-                for mesh_buffer in &mesh.mesh_buffers {
-                    let vertex_buffers = (
-                        mesh_buffer.vertex_buffer.clone(),
-                        mesh_buffer.normal_buffer.clone(),
-                        mesh_buffer.tex_coord_buffer.clone(),
-                    );
+                mesh.render(&mut builder, &deferred_pipeline, &deferred_set);
 
-                    let uniform_set = mesh_buffer.material.uniform_set.as_ref().unwrap();
-
-                    builder
-                        .bind_descriptor_sets(
-                            PipelineBindPoint::Graphics,
-                            pipeline.layout().clone(),
-                            0,
-                            vec![general_set.clone(), uniform_set.clone()],
-                        )
-                        .bind_vertex_buffers(0, vertex_buffers)
-                        .bind_index_buffer(mesh_buffer.index_buffer.clone())
-                        .draw_indexed(mesh_buffer.index_buffer.len() as u32, 1, 0, 0, 0)
-                        .unwrap();
-                }
+                builder
+                    .next_subpass(SubpassContents::Inline)
+                    .unwrap()
+                    .bind_pipeline_graphics(lighting_pipeline.clone())
+                    .bind_descriptor_sets(
+                        PipelineBindPoint::Graphics,
+                        lighting_pipeline.layout().clone(),
+                        0,
+                        lighting_set.clone(),
+                    )
+                    .bind_vertex_buffers(0, triangle_system.vertex_buffer.clone())
+                    .draw(6, 1, 0, 0)
+                    .unwrap();
 
                 render_egui(
                     &mut builder,
@@ -279,23 +279,4 @@ fn main() {
             _ => (),
         }
     });
-}
-
-mod vs_mod {
-    vulkano_shaders::shader! {
-        ty: "vertex",
-        path: "src/shaders/identity.vert",
-        types_meta: {
-            use bytemuck::{Pod, Zeroable};
-
-            #[derive(Clone, Copy, Zeroable, Pod)]
-        },
-    }
-}
-
-mod fs_mod {
-    vulkano_shaders::shader! {
-        ty: "fragment",
-        path: "src/shaders/identity.frag"
-    }
 }

@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::time::Instant;
 use vulkano::device::Features;
-use vulkano::pipeline::graphics::color_blend::ColorBlendState;
 use vulkano::{
     device::{
         physical::{PhysicalDevice, PhysicalDeviceType},
@@ -10,17 +9,8 @@ use vulkano::{
     format::Format,
     image::{view::ImageView, AttachmentImage, ImageAccess, ImageUsage, SwapchainImage},
     instance::{Instance, InstanceCreateInfo},
-    pipeline::{
-        graphics::{
-            depth_stencil::DepthStencilState,
-            input_assembly::InputAssemblyState,
-            vertex_input::BuffersDefinition,
-            viewport::{Viewport, ViewportState},
-        },
-        GraphicsPipeline,
-    },
-    render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass, Subpass},
-    shader::ShaderModule,
+    pipeline::graphics::viewport::Viewport,
+    render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass},
     swapchain::{Surface, Swapchain, SwapchainCreateInfo},
 };
 
@@ -31,12 +21,15 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
-use self::mesh::{Normal, TexCoord, Vertex};
+use self::renderer::deferred::DeferredRenderPass;
 
 pub mod camera;
 pub mod egui;
 pub mod mesh;
+pub mod renderer;
 pub mod texture;
+
+use renderer::deferred;
 
 pub struct PerformanceInfo {
     pub game_start: Instant,
@@ -56,6 +49,7 @@ pub struct System {
     pub images: Vec<Arc<SwapchainImage<Window>>>,
     pub surface: Arc<Surface<Window>>,
     pub queue: Arc<Queue>,
+    pub render_pass: DeferredRenderPass,
 }
 
 pub fn init(title: &str) -> System {
@@ -141,6 +135,8 @@ pub fn init(title: &str) -> System {
         .unwrap()
     };
 
+    let render_pass = deferred::init_render_pass(&device, &swapchain);
+
     System {
         info: SystemInfo {
             device_name: systtem_properties.device_name.clone(),
@@ -152,22 +148,43 @@ pub fn init(title: &str) -> System {
         images,
         surface,
         queue,
+        render_pass,
     }
 }
 
 pub fn window_size_dependent_setup(
     device: Arc<Device>,
-    vs: &ShaderModule,
-    fs: &ShaderModule,
     images: &[Arc<SwapchainImage<Window>>],
     render_pass: Arc<RenderPass>,
     viewport: &mut Viewport,
-) -> (Arc<GraphicsPipeline>, Vec<Arc<Framebuffer>>) {
+) -> (
+    Vec<Arc<Framebuffer>>,
+    Arc<ImageView<AttachmentImage>>,
+    Arc<ImageView<AttachmentImage>>,
+) {
     let dimensions = images[0].dimensions().width_height();
     viewport.dimensions = [dimensions[0] as f32, dimensions[1] as f32];
 
     let depth_buffer = ImageView::new_default(
         AttachmentImage::transient(device.clone(), dimensions, Format::D16_UNORM).unwrap(),
+    )
+    .unwrap();
+    let color_buffer = ImageView::new_default(
+        AttachmentImage::transient_input_attachment(
+            device.clone(),
+            dimensions,
+            Format::A2B10G10R10_UNORM_PACK32,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let normal_buffer = ImageView::new_default(
+        AttachmentImage::transient_input_attachment(
+            device.clone(),
+            dimensions,
+            Format::R16G16B16A16_SFLOAT,
+        )
+        .unwrap(),
     )
     .unwrap();
 
@@ -178,7 +195,12 @@ pub fn window_size_dependent_setup(
             Framebuffer::new(
                 render_pass.clone(),
                 FramebufferCreateInfo {
-                    attachments: vec![view, depth_buffer.clone()],
+                    attachments: vec![
+                        view,
+                        color_buffer.clone(),
+                        normal_buffer.clone(),
+                        depth_buffer.clone(),
+                    ],
                     ..Default::default()
                 },
             )
@@ -186,57 +208,5 @@ pub fn window_size_dependent_setup(
         })
         .collect::<Vec<_>>();
 
-    let vertex_input_state = BuffersDefinition::new()
-        .vertex::<Vertex>()
-        .vertex::<Normal>()
-        .vertex::<TexCoord>();
-
-    // let pipeline_layout = {
-    //     let mut layout_create_infos: Vec<_> = DescriptorSetLayoutCreateInfo::from_requirements(
-    //         fs.entry_point("main").unwrap().descriptor_requirements(),
-    //     );
-
-    //     // Set 0, Binding 0
-    //     let binding = layout_create_infos[0].bindings.get_mut(&0).unwrap();
-    //     binding.variable_descriptor_count = true;
-    //     binding.descriptor_count = 1;
-
-    //     let set_layouts = layout_create_infos
-    //         .into_iter()
-    //         .map(|desc| Ok(DescriptorSetLayout::new(device.clone(), desc.clone())?))
-    //         .collect::<Result<Vec<_>, DescriptorSetLayoutCreationError>>()
-    //         .unwrap();
-
-    //     PipelineLayout::new(
-    //         device.clone(),
-    //         PipelineLayoutCreateInfo {
-    //             set_layouts,
-    //             push_constant_ranges: fs
-    //                 .entry_point("main")
-    //                 .unwrap()
-    //                 .push_constant_requirements()
-    //                 .cloned()
-    //                 .into_iter()
-    //                 .collect(),
-    //             ..Default::default()
-    //         },
-    //     )
-    //     .unwrap()
-    // };
-
-    let subpass = Subpass::from(render_pass.clone(), 0).unwrap();
-    let pipeline = GraphicsPipeline::start()
-        .vertex_input_state(vertex_input_state)
-        .vertex_shader(vs.entry_point("main").unwrap(), ())
-        .input_assembly_state(InputAssemblyState::new())
-        .viewport_state(ViewportState::viewport_dynamic_scissor_irrelevant())
-        .fragment_shader(fs.entry_point("main").unwrap(), ())
-        .color_blend_state(ColorBlendState::new(subpass.num_color_attachments()).blend_alpha())
-        .depth_stencil_state(DepthStencilState::simple_depth_test())
-        .render_pass(subpass)
-        .build(device.clone())
-        // .with_pipeline_layout(device.clone(), pipeline_layout)
-        .unwrap();
-
-    (pipeline, framebuffers)
+    (framebuffers, color_buffer, normal_buffer)
 }

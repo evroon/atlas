@@ -59,7 +59,7 @@ pub fn get_egui_context(
     let egui_painter = egui_vulkano::Painter::new(
         system.device.clone(),
         system.queue.clone(),
-        Subpass::from(render_pass.clone(), 1).expect("Could not create egui subpass"),
+        Subpass::from(render_pass.clone(), 2).expect("Could not create egui subpass"),
     )
     .expect("Could not create egui painter");
 
