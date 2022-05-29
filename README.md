@@ -10,4 +10,5 @@ A Vulkan graphics engine written in Rust using [Vulkano](https://github.com/vulk
 
 # Features
 * Display UI with egui
+* Deferred renderer
 * Render 3D models using assimp

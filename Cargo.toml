@@ -17,8 +17,8 @@ serde = { version = "1.0", features = ["derive"] }
 ron = "0.7"
 rand = "0.8.4"
 glium = { git = "https://github.com/glium/glium.git", rev = "60889a2" }
-egui_vulkano = "0.7.0"
-egui = "0.17.0"
-egui-winit = "0.17.0"
+egui_vulkano = "0.8.0"
+egui = "0.18.0"
+egui-winit = "0.18.0"
 russimp = "1.0.3"
 winit_input_helper = "0.12.0"

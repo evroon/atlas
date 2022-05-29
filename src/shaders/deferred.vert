@@ -16,6 +16,6 @@ layout(set = 0, binding = 0) uniform Data {
 
 void main() {
     out_coords = tex_coord;
-    v_normal = normal;
+    v_normal = mat3(uniforms.world) * normal;
     gl_Position = uniforms.proj * uniforms.world_view * vec4(position, 1.0);
 }

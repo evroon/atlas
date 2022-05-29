@@ -10,13 +10,25 @@ use russimp::texture::DataContent;
 use russimp::texture::TextureType;
 use std::sync::Arc;
 use vulkano::buffer::BufferUsage;
+use vulkano::buffer::TypedBufferAccess;
+use vulkano::command_buffer::AutoCommandBufferBuilder;
 use vulkano::command_buffer::CommandBufferExecFuture;
 use vulkano::command_buffer::PrimaryAutoCommandBuffer;
 use vulkano::descriptor_set::layout::DescriptorSetLayout;
 use vulkano::image::view::ImageView;
 use vulkano::image::ImmutableImage;
 use vulkano::impl_vertex;
+use vulkano::pipeline::GraphicsPipeline;
+use vulkano::pipeline::Pipeline;
+use vulkano::pipeline::PipelineBindPoint;
 use vulkano::sync::NowFuture;
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
+pub struct Vertex2D {
+    pub position: [f32; 2],
+}
+impl_vertex!(Vertex2D, position);
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
@@ -205,5 +217,36 @@ pub fn load_gltf(system: &System, layout: &Arc<DescriptorSetLayout>) -> Mesh {
     Mesh {
         mesh_buffers,
         materials,
+    }
+}
+
+impl Mesh {
+    pub fn render(
+        &self,
+        builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
+        pipeline: &Arc<GraphicsPipeline>,
+        general_set: &Arc<PersistentDescriptorSet>,
+    ) {
+        for mesh_buffer in &self.mesh_buffers {
+            let vertex_buffers = (
+                mesh_buffer.vertex_buffer.clone(),
+                mesh_buffer.normal_buffer.clone(),
+                mesh_buffer.tex_coord_buffer.clone(),
+            );
+
+            let uniform_set = mesh_buffer.material.uniform_set.as_ref().unwrap();
+
+            builder
+                .bind_descriptor_sets(
+                    PipelineBindPoint::Graphics,
+                    pipeline.layout().clone(),
+                    0,
+                    vec![general_set.clone(), uniform_set.clone()],
+                )
+                .bind_vertex_buffers(0, vertex_buffers)
+                .bind_index_buffer(mesh_buffer.index_buffer.clone())
+                .draw_indexed(mesh_buffer.index_buffer.len() as u32, 1, 0, 0, 0)
+                .unwrap();
+        }
     }
 }
