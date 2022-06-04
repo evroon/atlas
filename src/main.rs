@@ -9,6 +9,7 @@ use atlas_core::{
     },
     PerformanceInfo,
 };
+
 use std::time::Instant;
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer, CpuBufferPool},
@@ -39,7 +40,7 @@ fn main() {
         depth_range: 0.0..1.0,
     };
 
-    let (mut framebuffers, mut color_buffer, mut normal_buffer) =
+    let (mut framebuffers, mut color_buffer, mut normal_buffer, mut position_buffer) =
         atlas_core::window_size_dependent_setup(
             system.device.clone(),
             &system.images,
@@ -112,17 +113,22 @@ fn main() {
                         };
 
                     system.swapchain = new_swapchain;
-                    let (new_framebuffers, new_color_buffer, new_normal_buffer) =
-                        atlas_core::window_size_dependent_setup(
-                            system.device.clone(),
-                            &new_images,
-                            system.render_pass.render_pass.clone(),
-                            &mut viewport,
-                        );
+                    let (
+                        new_framebuffers,
+                        new_color_buffer,
+                        new_normal_buffer,
+                        new_position_buffer,
+                    ) = atlas_core::window_size_dependent_setup(
+                        system.device.clone(),
+                        &new_images,
+                        system.render_pass.render_pass.clone(),
+                        &mut viewport,
+                    );
 
                     framebuffers = new_framebuffers;
                     color_buffer = new_color_buffer;
                     normal_buffer = new_normal_buffer;
+                    position_buffer = new_position_buffer;
                     recreate_swapchain = false;
                 }
 
@@ -161,7 +167,11 @@ fn main() {
                     [
                         WriteDescriptorSet::image_view(0, color_buffer.clone()),
                         WriteDescriptorSet::image_view(1, normal_buffer.clone()),
-                        WriteDescriptorSet::buffer(2, uniform_buffer_subbuffer),
+                        WriteDescriptorSet::image_view(2, position_buffer.clone()),
+                        WriteDescriptorSet::buffer(
+                            3,
+                            system.render_pass.lighting_uniform_subbuffer.clone(),
+                        ),
                     ],
                 )
                 .unwrap();
@@ -198,6 +208,7 @@ fn main() {
                 );
 
                 let clear_values = vec![
+                    [0.0, 0.0, 0.0, 1.0].into(),
                     [0.0, 0.0, 0.0, 1.0].into(),
                     [0.0, 0.0, 0.0, 1.0].into(),
                     [0.0, 0.0, 0.0, 1.0].into(),

@@ -161,6 +161,7 @@ pub fn window_size_dependent_setup(
     Vec<Arc<Framebuffer>>,
     Arc<ImageView<AttachmentImage>>,
     Arc<ImageView<AttachmentImage>>,
+    Arc<ImageView<AttachmentImage>>,
 ) {
     let dimensions = images[0].dimensions().width_height();
     viewport.dimensions = [dimensions[0] as f32, dimensions[1] as f32];
@@ -187,6 +188,15 @@ pub fn window_size_dependent_setup(
         .unwrap(),
     )
     .unwrap();
+    let position_buffer = ImageView::new_default(
+        AttachmentImage::transient_input_attachment(
+            device.clone(),
+            dimensions,
+            Format::R16G16B16A16_SFLOAT,
+        )
+        .unwrap(),
+    )
+    .unwrap();
 
     let framebuffers = images
         .iter()
@@ -199,6 +209,7 @@ pub fn window_size_dependent_setup(
                         view,
                         color_buffer.clone(),
                         normal_buffer.clone(),
+                        position_buffer.clone(),
                         depth_buffer.clone(),
                     ],
                     ..Default::default()
@@ -208,5 +219,5 @@ pub fn window_size_dependent_setup(
         })
         .collect::<Vec<_>>();
 
-    (framebuffers, color_buffer, normal_buffer)
+    (framebuffers, color_buffer, normal_buffer, position_buffer)
 }
