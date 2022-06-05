@@ -1,7 +1,7 @@
 use crate::atlas_core::SystemInfo;
 use std::sync::Arc;
 
-use egui::{epaint::ClippedShape, TextStyle};
+use egui::{epaint::ClippedShape, TextStyle, Ui};
 use egui_vulkano::UpdateTexturesResult;
 use egui_winit::State;
 use vulkano::{
@@ -13,7 +13,10 @@ use vulkano::{
 };
 use winit::window::Window;
 
-use super::{PerformanceInfo, System};
+use super::{
+    renderer::deferred::{DebugPreviewBuffer, RendererParams},
+    PerformanceInfo, System,
+};
 
 pub enum FrameEndFuture<F: GpuFuture + 'static> {
     FenceSignalFuture(FenceSignalFuture<F>),
@@ -66,6 +69,14 @@ pub fn get_egui_context(
     (egui_ctx, egui_winit, egui_painter)
 }
 
+fn preview_type_checkbox_item(
+    ui: &mut Ui,
+    item: DebugPreviewBuffer,
+    value: &mut DebugPreviewBuffer,
+) -> egui::Response {
+    ui.selectable_value(value, item, item.get_text())
+}
+
 pub fn update_textures_egui(
     performance_info: &PerformanceInfo,
     system_info: &SystemInfo,
@@ -74,6 +85,7 @@ pub fn update_textures_egui(
     egui_ctx: &egui::Context,
     egui_painter: &mut egui_vulkano::Painter,
     egui_winit: &mut State,
+    params: &mut RendererParams,
 ) -> (Vec<ClippedShape>, bool) {
     egui_ctx.begin_frame(egui_winit.take_egui_input(surface.window()));
 
@@ -84,6 +96,40 @@ pub fn update_textures_egui(
             "delta time: {:.2} ms",
             performance_info.delta_time_ms
         ));
+
+        ui.label("Ambient light color");
+        ui.color_edit_button_rgba_unmultiplied(&mut params.ambient_color);
+        ui.end_row();
+
+        ui.label("Directional light color");
+        ui.color_edit_button_rgba_unmultiplied(&mut params.directional_color);
+        ui.end_row();
+
+        egui::ComboBox::from_label("Preview")
+            .selected_text(params.preview_buffer.get_text())
+            .show_ui(ui, |ui| {
+                preview_type_checkbox_item(
+                    ui,
+                    DebugPreviewBuffer::FinalOutput,
+                    &mut params.preview_buffer,
+                );
+                preview_type_checkbox_item(
+                    ui,
+                    DebugPreviewBuffer::Albedo,
+                    &mut params.preview_buffer,
+                );
+                preview_type_checkbox_item(
+                    ui,
+                    DebugPreviewBuffer::Normal,
+                    &mut params.preview_buffer, 
+                );
+                preview_type_checkbox_item(
+                    ui,
+                    DebugPreviewBuffer::Position,
+                    &mut params.preview_buffer,
+                );
+            });
+        ui.end_row();
     });
 
     // Get the shapes from egui

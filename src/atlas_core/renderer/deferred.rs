@@ -24,50 +24,89 @@ use crate::atlas_core::mesh::{Normal, TexCoord, Vertex, Vertex2D};
 
 use self::lighting_frag_mod::ty::LightingData;
 
+#[derive(PartialEq, Clone, Copy)]
+pub enum DebugPreviewBuffer {
+    FinalOutput = 0,
+    Albedo = 1,
+    Normal = 2,
+    Position = 3,
+}
+
+impl DebugPreviewBuffer {
+    pub fn get_text(&self) -> &str {
+        match self {
+            DebugPreviewBuffer::FinalOutput => "Final Output",
+            DebugPreviewBuffer::Albedo => "Albedo",
+            DebugPreviewBuffer::Normal => "Normal",
+            DebugPreviewBuffer::Position => "Position",
+        }
+    }
+}
+
+pub struct RendererParams {
+    pub ambient_color: [f32; 4],
+    pub directional_direction: [f32; 4],
+    pub directional_color: [f32; 4],
+    pub preview_buffer: DebugPreviewBuffer,
+}
+
 pub struct DeferredRenderPass {
     pub render_pass: Arc<RenderPass>,
     pub deferred_pass: Subpass,
     pub lighting_pass: Subpass,
-    pub lighting_uniform_subbuffer: Arc<CpuBufferPoolSubbuffer<LightingData, Arc<StdMemoryPool>>>,
+    pub params: RendererParams,
+}
+
+pub fn get_default_params() -> RendererParams {
+    RendererParams {
+        ambient_color: Vector4 {
+            x: 1.0,
+            y: 1.0,
+            z: 1.0,
+            w: 0.3,
+        }
+        .into(),
+        directional_direction: Vector4 {
+            x: 0.0,
+            y: -PI / 2.0,
+            z: -PI / 2.0,
+            w: 0.0,
+        }
+        .into(),
+        directional_color: Vector4 {
+            x: 1.0,
+            y: 1.0,
+            z: 1.0,
+            w: 0.0,
+        }
+        .into(),
+        preview_buffer: DebugPreviewBuffer::FinalOutput,
+    }
+}
+
+pub fn get_lighting_uniform_buffer(
+    device: &Arc<Device>,
+    params: &RendererParams,
+) -> Arc<CpuBufferPoolSubbuffer<LightingData, Arc<StdMemoryPool>>> {
+    let lighting_buffer = CpuBufferPool::<lighting_frag_mod::ty::LightingData>::new(
+        device.clone(),
+        BufferUsage::all(),
+    );
+
+    let uniform_data = lighting_frag_mod::ty::LightingData {
+        ambient_color: params.ambient_color,
+        directional_direction: params.directional_direction,
+        directional_color: params.directional_color,
+        preview_type: params.preview_buffer as i32,
+    };
+
+    lighting_buffer.next(uniform_data).unwrap()
 }
 
 pub fn init_render_pass(
     device: &Arc<Device>,
     swapchain: &Arc<Swapchain<Window>>,
 ) -> DeferredRenderPass {
-    let lighting_buffer = CpuBufferPool::<lighting_frag_mod::ty::LightingData>::new(
-        device.clone(),
-        BufferUsage::all(),
-    );
-
-    let lighting_uniform_subbuffer = {
-        let uniform_data = lighting_frag_mod::ty::LightingData {
-            ambient_color: Vector4 {
-                x: 1.0,
-                y: 1.0,
-                z: 1.0,
-                w: 0.3,
-            }
-            .into(),
-            directional_direction: Vector4 {
-                x: 0.0,
-                y: -PI / 2.0,
-                z: -PI / 2.0,
-                w: 0.0,
-            }
-            .into(),
-            directional_color: Vector4 {
-                x: 1.0,
-                y: 1.0,
-                z: 1.0,
-                w: 0.0,
-            }
-            .into(),
-        };
-
-        lighting_buffer.next(uniform_data).unwrap()
-    };
-
     let render_pass = vulkano::ordered_passes_renderpass!(
         device.clone(),
         attachments: {
@@ -128,7 +167,7 @@ pub fn init_render_pass(
         render_pass,
         deferred_pass,
         lighting_pass,
-        lighting_uniform_subbuffer,
+        params: get_default_params(),
     }
 }
 

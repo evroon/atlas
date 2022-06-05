@@ -10,17 +10,32 @@ layout(set = 0, binding = 3) uniform LightingData {
     vec4 ambient_color;
     vec4 directional_direction;
     vec4 directional_color;
+    int preview_type;
 } u_lighting;
+
+vec3 main_pass(vec3 albedo, vec3 normal, vec3 position) {
+    vec3 ambient_color = u_lighting.ambient_color.a * u_lighting.ambient_color.rgb;
+    float directional_intensity = max(dot(normal, u_lighting.directional_direction.xyz), 0.0);
+    vec3 directional_color = directional_intensity * u_lighting.directional_color.xyz;
+    return (ambient_color + directional_color) * albedo;
+}
 
 void main() {
     vec3 albedo = subpassLoad(u_color).rgb;
     vec3 normal = subpassLoad(u_normal).rgb;
     vec3 position = subpassLoad(u_position).rgb;
 
-    vec3 ambient_color = u_lighting.ambient_color.a * u_lighting.ambient_color.rgb;
-    float directional_intensity = max(dot(normal, u_lighting.directional_direction.xyz), 0.0);
-    vec3 directional_color = directional_intensity * u_lighting.directional_color.xyz;
-    vec3 combined_color = (ambient_color + directional_color) * albedo;
+    vec3 final_output = 0.0.xxx;
 
-    f_color = vec4(combined_color, 1.0);
+    if (u_lighting.preview_type == 1) {
+        final_output = albedo;
+    } else if (u_lighting.preview_type == 2) {
+        final_output = normal;
+    } else if (u_lighting.preview_type == 3) {
+        final_output = position;
+    } else {
+        final_output = main_pass(albedo, normal, position);
+    }
+
+    f_color = vec4(final_output, 1.0);
 }

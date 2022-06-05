@@ -4,7 +4,7 @@ use atlas_core::{
     egui::{get_egui_context, render_egui, update_textures_egui, FrameEndFuture},
     mesh::load_gltf,
     renderer::{
-        deferred::{self, deferred_vert_mod},
+        deferred::{self, deferred_vert_mod, get_lighting_uniform_buffer},
         triangle_draw_system::TriangleDrawSystem,
     },
     PerformanceInfo,
@@ -170,7 +170,10 @@ fn main() {
                         WriteDescriptorSet::image_view(2, position_buffer.clone()),
                         WriteDescriptorSet::buffer(
                             3,
-                            system.render_pass.lighting_uniform_subbuffer.clone(),
+                            get_lighting_uniform_buffer(
+                                &system.device.clone(),
+                                &system.render_pass.params,
+                            ),
                         ),
                     ],
                 )
@@ -205,6 +208,7 @@ fn main() {
                     &egui_ctx,
                     &mut egui_painter,
                     &mut egui_winit,
+                    &mut system.render_pass.params,
                 );
 
                 let clear_values = vec![
