@@ -1,12 +1,15 @@
 use crate::atlas_core::camera::CameraInputLogic;
 use atlas_core::{
+    acquire_image,
     camera::construct_camera,
     egui::{get_egui_context, render_egui, update_textures_egui, FrameEndFuture},
     mesh::load_gltf,
     renderer::{
-        deferred::{self, deferred_vert_mod, get_lighting_uniform_buffer},
+        deferred::{self, deferred_vert_mod, get_lighting_uniform_buffer, prepare_deferred_pass},
         triangle_draw_system::TriangleDrawSystem,
     },
+    start_builder,
+    texture::get_default_sampler,
     PerformanceInfo,
 };
 use cgmath::Matrix4;
@@ -14,10 +17,10 @@ use cgmath::Matrix4;
 use std::{path::Path, time::Instant};
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer, CpuBufferPool},
-    command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, SubpassContents},
+    command_buffer::SubpassContents,
     descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet},
-    pipeline::{graphics::viewport::Viewport, Pipeline, PipelineBindPoint},
-    swapchain::{acquire_next_image, AcquireError, SwapchainCreateInfo, SwapchainCreationError},
+    pipeline::{Pipeline, PipelineBindPoint},
+    swapchain::{SwapchainCreateInfo, SwapchainCreationError},
     sync::{FlushError, GpuFuture},
 };
 use winit::{
@@ -35,25 +38,24 @@ fn main() {
         BufferUsage::all(),
     );
 
-    let mut viewport = Viewport {
-        origin: [0.0, 0.0],
-        dimensions: [0.0, 0.0],
-        depth_range: 0.0..1.0,
-    };
-
-    let (mut framebuffers, mut color_buffer, mut normal_buffer, mut position_buffer) =
-        atlas_core::window_size_dependent_setup(
-            system.device.clone(),
-            &system.images,
-            system.render_pass.render_pass.clone(),
-            &mut viewport,
-        );
+    let (
+        mut framebuffers,
+        mut color_buffer,
+        mut normal_buffer,
+        mut position_buffer,
+        mut shadow_map_buffer,
+    ) = atlas_core::window_size_dependent_setup(
+        system.device.clone(),
+        &system.images,
+        system.deferred_render_pass.render_pass.clone(),
+        &mut system.viewport,
+    );
 
     let mut recreate_swapchain = false;
     let mut previous_frame_end = Some(FrameEndFuture::now(system.device.clone()));
 
     let (egui_ctx, mut egui_winit, mut egui_painter) =
-        get_egui_context(&system, &system.render_pass.render_pass);
+        get_egui_context(&system, &system.deferred_render_pass.render_pass);
 
     let mut camera = construct_camera();
     let mut input = WinitInputHelper::new();
@@ -67,7 +69,7 @@ fn main() {
     };
 
     let (deferred_pipeline, lighting_pipeline) =
-        deferred::init_pipelines(&system.device, &system.render_pass);
+        deferred::init_pipelines(&system.device, &system.deferred_render_pass);
 
     let triangle_system = TriangleDrawSystem::new(&system.queue);
 
@@ -125,17 +127,19 @@ fn main() {
                         new_color_buffer,
                         new_normal_buffer,
                         new_position_buffer,
+                        new_shadow_map_buffer,
                     ) = atlas_core::window_size_dependent_setup(
                         system.device.clone(),
                         &new_images,
-                        system.render_pass.render_pass.clone(),
-                        &mut viewport,
+                        system.deferred_render_pass.render_pass.clone(),
+                        &mut system.viewport,
                     );
 
                     framebuffers = new_framebuffers;
                     color_buffer = new_color_buffer;
                     normal_buffer = new_normal_buffer;
                     position_buffer = new_position_buffer;
+                    shadow_map_buffer = new_shadow_map_buffer;
                     recreate_swapchain = false;
                 }
 
@@ -176,37 +180,30 @@ fn main() {
                         WriteDescriptorSet::image_view(0, color_buffer.clone()),
                         WriteDescriptorSet::image_view(1, normal_buffer.clone()),
                         WriteDescriptorSet::image_view(2, position_buffer.clone()),
-                        WriteDescriptorSet::buffer(
+                        WriteDescriptorSet::image_view_sampler(
                             3,
+                            shadow_map_buffer.clone(),
+                            get_default_sampler(&system.device).clone(),
+                        ),
+                        WriteDescriptorSet::buffer(
+                            10,
                             get_lighting_uniform_buffer(
                                 &system.device.clone(),
-                                &system.render_pass.params,
+                                &system.deferred_render_pass.params,
                             ),
                         ),
                     ],
                 )
                 .unwrap();
 
-                let (image_num, suboptimal, acquire_future) =
-                    match acquire_next_image(system.swapchain.clone(), None) {
-                        Ok(r) => r,
-                        Err(AcquireError::OutOfDate) => {
-                            recreate_swapchain = true;
-                            return;
-                        }
-                        Err(e) => panic!("Failed to acquire next image: {:?}", e),
-                    };
-
-                if suboptimal {
-                    recreate_swapchain = true;
+                let image_update_result = acquire_image(&system.swapchain, &mut recreate_swapchain);
+                if image_update_result.is_err() {
+                    return;
                 }
 
-                let mut builder = AutoCommandBufferBuilder::primary(
-                    system.device.clone(),
-                    system.queue.family(),
-                    CommandBufferUsage::OneTimeSubmit,
-                )
-                .unwrap();
+                let (image_num, acquire_future) = image_update_result.unwrap();
+
+                let mut builder = start_builder(&system.device, &system.queue);
 
                 let (shapes, wait_for_last_frame) = update_textures_egui(
                     &performance_info,
@@ -216,26 +213,15 @@ fn main() {
                     &egui_ctx,
                     &mut egui_painter,
                     &mut egui_winit,
-                    &mut system.render_pass.params,
+                    &mut system.deferred_render_pass.params,
                 );
 
-                let clear_values = vec![
-                    [0.0, 0.0, 0.0, 1.0].into(),
-                    [0.0, 0.0, 0.0, 1.0].into(),
-                    [0.0, 0.0, 0.0, 1.0].into(),
-                    [0.0, 0.0, 0.0, 1.0].into(),
-                    1f32.into(),
-                ];
-
-                builder
-                    .begin_render_pass(
-                        framebuffers[image_num].clone(),
-                        SubpassContents::Inline,
-                        clear_values,
-                    )
-                    .unwrap()
-                    .set_viewport(0, [viewport.clone()])
-                    .bind_pipeline_graphics(deferred_pipeline.clone());
+                prepare_deferred_pass(
+                    &mut builder,
+                    &framebuffers[image_num],
+                    &deferred_pipeline,
+                    &system.viewport,
+                );
 
                 mesh.render(&mut builder, &deferred_pipeline, &deferred_set);
 

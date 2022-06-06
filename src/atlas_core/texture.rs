@@ -1,11 +1,12 @@
 use crate::atlas_core::mesh::Texture;
-use crate::atlas_core::System;
+
 use png::ColorType;
 use std::io::prelude::*;
 use std::{fs::File, io::Cursor, sync::Arc};
 use vulkano::descriptor_set::layout::DescriptorSetLayout;
 use vulkano::descriptor_set::PersistentDescriptorSet;
 use vulkano::descriptor_set::WriteDescriptorSet;
+use vulkano::device::Device;
 use vulkano::sampler::Sampler;
 use vulkano::sampler::{Filter, SamplerAddressMode, SamplerCreateInfo};
 use vulkano::{
@@ -72,15 +73,9 @@ pub fn load_png_file(queue: &Arc<Queue>, path: &str) -> Texture {
     load_png(queue, &png_bytes)
 }
 
-pub fn get_descriptor_set(
-    system: &System,
-    layout: &Arc<DescriptorSetLayout>,
-    texture: Texture,
-) -> Arc<PersistentDescriptorSet> {
-    let image = texture.image;
-
-    let sampler = Sampler::new(
-        system.device.clone(),
+pub fn get_default_sampler(device: &Arc<Device>) -> Arc<Sampler> {
+    Sampler::new(
+        device.clone(),
         SamplerCreateInfo {
             mag_filter: Filter::Linear,
             min_filter: Filter::Linear,
@@ -88,14 +83,22 @@ pub fn get_descriptor_set(
             ..Default::default()
         },
     )
-    .unwrap();
+    .unwrap()
+}
+
+pub fn get_descriptor_set(
+    device: &Arc<Device>,
+    layout: &Arc<DescriptorSetLayout>,
+    texture: Texture,
+) -> Arc<PersistentDescriptorSet> {
+    let image = texture.image;
 
     PersistentDescriptorSet::new(
         layout.clone(),
         [WriteDescriptorSet::image_view_sampler(
             0,
             image.clone(),
-            sampler.clone(),
+            get_default_sampler(device).clone(),
         )],
     )
     .unwrap()

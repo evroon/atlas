@@ -1,6 +1,10 @@
 use std::sync::Arc;
 use std::time::Instant;
+use vulkano::command_buffer::{
+    AutoCommandBufferBuilder, CommandBufferUsage, PrimaryAutoCommandBuffer,
+};
 use vulkano::device::Features;
+use vulkano::swapchain::{acquire_next_image, AcquireError, Surface, SwapchainAcquireFuture};
 use vulkano::{
     device::{
         physical::{PhysicalDevice, PhysicalDeviceType},
@@ -11,7 +15,7 @@ use vulkano::{
     instance::{Instance, InstanceCreateInfo},
     pipeline::graphics::viewport::Viewport,
     render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass},
-    swapchain::{Surface, Swapchain, SwapchainCreateInfo},
+    swapchain::{Swapchain, SwapchainCreateInfo},
 };
 
 use vulkano_win::VkSurfaceBuild;
@@ -22,6 +26,7 @@ use winit::{
 };
 
 use self::renderer::deferred::DeferredRenderPass;
+use self::renderer::shadow_map::ShadowMapRenderPass;
 
 pub mod camera;
 pub mod egui;
@@ -30,6 +35,7 @@ pub mod renderer;
 pub mod texture;
 
 use renderer::deferred;
+use renderer::shadow_map;
 
 pub struct PerformanceInfo {
     pub game_start: Instant,
@@ -49,7 +55,9 @@ pub struct System {
     pub images: Vec<Arc<SwapchainImage<Window>>>,
     pub surface: Arc<Surface<Window>>,
     pub queue: Arc<Queue>,
-    pub render_pass: DeferredRenderPass,
+    pub deferred_render_pass: DeferredRenderPass,
+    pub shadow_map_render_pass: ShadowMapRenderPass,
+    pub viewport: Viewport,
 }
 
 pub fn init(title: &str) -> System {
@@ -135,7 +143,14 @@ pub fn init(title: &str) -> System {
         .unwrap()
     };
 
-    let render_pass = deferred::init_render_pass(&device, &swapchain);
+    let viewport = Viewport {
+        origin: [0.0, 0.0],
+        dimensions: [0.0, 0.0],
+        depth_range: 0.0..1.0,
+    };
+
+    let deferred_render_pass = deferred::init_render_pass(&device, &swapchain);
+    let shadow_map_render_pass = shadow_map::init_render_pass(&device);
 
     System {
         info: SystemInfo {
@@ -148,8 +163,43 @@ pub fn init(title: &str) -> System {
         images,
         surface,
         queue,
-        render_pass,
+        deferred_render_pass,
+        shadow_map_render_pass,
+        viewport,
     }
+}
+
+pub fn acquire_image(
+    swapchain: &Arc<Swapchain<Window>>,
+    recreate_swapchain: &mut bool,
+) -> Result<(usize, SwapchainAcquireFuture<Window>), AcquireError> {
+    let (image_num, suboptimal, acquire_future) = match acquire_next_image(swapchain.clone(), None)
+    {
+        Ok(r) => r,
+        Err(AcquireError::OutOfDate) => {
+            *recreate_swapchain = true;
+            return Err(AcquireError::OutOfDate);
+        }
+        Err(e) => panic!("Failed to acquire next image: {:?}", e),
+    };
+
+    if suboptimal {
+        *recreate_swapchain = true;
+    }
+
+    Ok((image_num, acquire_future))
+}
+
+pub fn start_builder(
+    device: &Arc<Device>,
+    queue: &Arc<Queue>,
+) -> AutoCommandBufferBuilder<PrimaryAutoCommandBuffer> {
+    AutoCommandBufferBuilder::primary(
+        device.clone(),
+        queue.family(),
+        CommandBufferUsage::OneTimeSubmit,
+    )
+    .unwrap()
 }
 
 pub fn window_size_dependent_setup(
@@ -159,6 +209,7 @@ pub fn window_size_dependent_setup(
     viewport: &mut Viewport,
 ) -> (
     Vec<Arc<Framebuffer>>,
+    Arc<ImageView<AttachmentImage>>,
     Arc<ImageView<AttachmentImage>>,
     Arc<ImageView<AttachmentImage>>,
     Arc<ImageView<AttachmentImage>>,
@@ -197,6 +248,10 @@ pub fn window_size_dependent_setup(
         .unwrap(),
     )
     .unwrap();
+    let shadow_map_buffer = ImageView::new_default(
+        AttachmentImage::sampled(device.clone(), dimensions, Format::D16_UNORM).unwrap(),
+    )
+    .unwrap();
 
     let framebuffers = images
         .iter()
@@ -219,5 +274,11 @@ pub fn window_size_dependent_setup(
         })
         .collect::<Vec<_>>();
 
-    (framebuffers, color_buffer, normal_buffer, position_buffer)
+    (
+        framebuffers,
+        color_buffer,
+        normal_buffer,
+        position_buffer,
+        shadow_map_buffer,
+    )
 }

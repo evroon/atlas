@@ -122,8 +122,8 @@ pub fn load_material(
     };
 
     let uniform_set = match result_tex {
-        None => get_descriptor_set(system, layout, load_default_texture(system)),
-        Some(x) => get_descriptor_set(system, layout, x),
+        None => get_descriptor_set(&system.device, layout, load_default_texture(system)),
+        Some(x) => get_descriptor_set(&system.device, layout, x),
     };
 
     Material {

@@ -3,18 +3,21 @@ use std::{f32::consts::PI, sync::Arc};
 use cgmath::Vector4;
 use vulkano::{
     buffer::{cpu_pool::CpuBufferPoolSubbuffer, BufferUsage, CpuBufferPool},
+    command_buffer::{AutoCommandBufferBuilder, PrimaryAutoCommandBuffer, SubpassContents},
     device::Device,
     format::Format,
     memory::pool::StdMemoryPool,
     pipeline::{
         graphics::{
-            color_blend::ColorBlendState, depth_stencil::DepthStencilState,
-            input_assembly::InputAssemblyState, vertex_input::BuffersDefinition,
-            viewport::ViewportState,
+            color_blend::ColorBlendState,
+            depth_stencil::DepthStencilState,
+            input_assembly::InputAssemblyState,
+            vertex_input::BuffersDefinition,
+            viewport::{Viewport, ViewportState},
         },
         GraphicsPipeline,
     },
-    render_pass::{RenderPass, Subpass},
+    render_pass::{Framebuffer, RenderPass, Subpass},
     swapchain::Swapchain,
 };
 
@@ -77,7 +80,7 @@ pub fn get_default_params() -> RendererParams {
             x: 1.0,
             y: 1.0,
             z: 1.0,
-            w: 0.0,
+            w: 0.3,
         }
         .into(),
         preview_buffer: DebugPreviewBuffer::FinalOutput,
@@ -213,6 +216,27 @@ pub fn init_pipelines(
         .unwrap();
 
     (deferred_pipeline, lighting_pipeline)
+}
+
+pub fn prepare_deferred_pass(
+    builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
+    framebuffer: &Arc<Framebuffer>,
+    deferred_pipeline: &Arc<GraphicsPipeline>,
+    viewport: &Viewport,
+) {
+    let clear_values = vec![
+        [0.0, 0.0, 0.0, 1.0].into(),
+        [0.0, 0.0, 0.0, 1.0].into(),
+        [0.0, 0.0, 0.0, 1.0].into(),
+        [0.0, 0.0, 0.0, 1.0].into(),
+        1f32.into(),
+    ];
+
+    builder
+        .begin_render_pass(framebuffer.clone(), SubpassContents::Inline, clear_values)
+        .unwrap()
+        .set_viewport(0, [viewport.clone()])
+        .bind_pipeline_graphics(deferred_pipeline.clone());
 }
 
 pub mod deferred_vert_mod {
