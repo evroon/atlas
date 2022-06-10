@@ -12,3 +12,19 @@ A Vulkan graphics engine written in Rust using [Vulkano](https://github.com/vulk
 * Display UI with egui
 * Deferred renderer
 * Render 3D models using assimp
+
+# Usage
+After installing Rust, run the following commands to install additional dependencies on Ubuntu and
+to fetch the Sponza model.
+
+```bash
+scripts/setup.sh
+scripts/get_assets.sh
+```
+
+It's advised to build the code in release mode, because loading PNG textures in debug mode is very slow.
+To run the application, run:
+
+```bash
+cargo run --release
+```
