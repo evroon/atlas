@@ -1,7 +1,6 @@
 use crate::atlas_core::texture::get_descriptor_set;
 use crate::atlas_core::texture::load_png;
 use crate::atlas_core::texture::load_png_file;
-use crate::atlas_core::System;
 use crate::CpuAccessibleBuffer;
 use crate::PersistentDescriptorSet;
 use bytemuck::{Pod, Zeroable};
@@ -24,6 +23,8 @@ use vulkano::pipeline::GraphicsPipeline;
 use vulkano::pipeline::Pipeline;
 use vulkano::pipeline::PipelineBindPoint;
 use vulkano::sync::NowFuture;
+
+use super::system::System;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
@@ -97,7 +98,7 @@ pub fn load_material(
     let result_tex = if base_textures.is_some() {
         let assimp_texture = &base_textures.unwrap().first().unwrap();
 
-        let texture = if assimp_texture.path != "" {
+        let texture = if !assimp_texture.path.starts_with("*") {
             let abs_tex_path = base_dir.to_owned() + assimp_texture.path.as_str();
             load_png_file(&system.queue, &abs_tex_path)
         } else {
@@ -122,8 +123,8 @@ pub fn load_material(
     };
 
     let uniform_set = match result_tex {
-        None => get_descriptor_set(system, layout, load_default_texture(system)),
-        Some(x) => get_descriptor_set(system, layout, x),
+        None => get_descriptor_set(&system.device, layout, load_default_texture(system)),
+        Some(x) => get_descriptor_set(&system.device, layout, x),
     };
 
     Material {
