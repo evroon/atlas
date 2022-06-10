@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use crate::WinitInputHelper;
-use cgmath::{Matrix3, Matrix4, Point3, Rad, Vector3};
+use cgmath::{InnerSpace, Matrix3, Matrix4, Point3, Rad, Vector3};
 use winit::event::VirtualKeyCode;
 
 const MOUSE_BUTTON_LEFT: usize = 0;
@@ -33,7 +33,6 @@ impl Camera {
         );
 
         self.view = Matrix4::look_to_rh(self.position, self.forward, self.up);
-        self.world = Matrix4::from_scale(1.0);
         self.world_view = self.view * self.world;
     }
 }
@@ -99,10 +98,10 @@ impl CameraInputLogic for Camera {
             let transform = Matrix3::from_axis_angle(self.up, Rad(-diff.0 * rotate_speed))
                 * Matrix3::from_axis_angle(self.right, Rad(diff.1 * rotate_speed));
 
-            self.forward = transform * self.forward;
+            self.forward = (transform * self.forward).normalize();
 
             if input.held_control() {
-                self.up = transform * self.up;
+                self.up = (transform * self.up).normalize();
             } else {
                 self.up = Vector3::unit_y();
             }

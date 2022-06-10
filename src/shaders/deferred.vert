@@ -7,7 +7,7 @@ layout(location = 2) in vec2 tex_coord;
 layout(location = 0) out vec3 v_normal;
 layout(location = 1) out vec2 out_coords;
 
-layout(set = 0, binding = 0) uniform Data {
+layout(set = 0, binding = 0) uniform CameraData {
     mat4 world_view;
     mat4 world;
     mat4 view;

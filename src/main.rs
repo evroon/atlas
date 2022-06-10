@@ -9,6 +9,7 @@ use atlas_core::{
     },
     PerformanceInfo,
 };
+use cgmath::Matrix4;
 
 use std::{path::Path, time::Instant};
 use vulkano::{
@@ -29,7 +30,7 @@ mod atlas_core;
 
 fn main() {
     let mut system = atlas_core::init("Atlas Engine");
-    let uniform_buffer = CpuBufferPool::<deferred_vert_mod::ty::Data>::new(
+    let uniform_buffer = CpuBufferPool::<deferred_vert_mod::ty::CameraData>::new(
         system.device.clone(),
         BufferUsage::all(),
     );
@@ -71,11 +72,13 @@ fn main() {
     let triangle_system = TriangleDrawSystem::new(&system.queue);
 
     let layout = deferred_pipeline.layout().set_layouts().get(1).unwrap();
-    let mesh = load_gltf(
+    let mut mesh = load_gltf(
         &system,
         layout,
         Path::new("assets/models/sponza/sponza.glb"),
     );
+    // We need to turn the model upside-down.
+    mesh.model_matrix = Matrix4::from_nonuniform_scale(1.0, -1.0, 1.0);
 
     system.event_loop.run(move |event, _, control_flow| {
         if input.update(&event) {
@@ -143,9 +146,10 @@ fn main() {
 
                     let extent = system.swapchain.image_extent();
                     camera.aspect_ratio = extent[0] as f32 / extent[1] as f32;
+                    camera.world = mesh.model_matrix.into();
                     camera.update();
 
-                    let uniform_data = deferred_vert_mod::ty::Data {
+                    let uniform_data = deferred_vert_mod::ty::CameraData {
                         world_view: camera.world_view.into(),
                         world: camera.world.into(),
                         view: camera.view.into(),

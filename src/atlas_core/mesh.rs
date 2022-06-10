@@ -5,6 +5,7 @@ use crate::atlas_core::System;
 use crate::CpuAccessibleBuffer;
 use crate::PersistentDescriptorSet;
 use bytemuck::{Pod, Zeroable};
+use cgmath::Matrix4;
 use russimp::scene::{PostProcess, Scene};
 use russimp::texture::DataContent;
 use russimp::texture::TextureType;
@@ -75,6 +76,7 @@ pub struct Material {
 pub struct Mesh {
     pub mesh_buffers: Vec<MeshBuffer>,
     pub materials: Vec<Material>,
+    pub model_matrix: Matrix4<f32>,
 }
 
 fn load_default_texture(system: &System) -> Texture {
@@ -229,6 +231,7 @@ pub fn load_gltf(system: &System, layout: &Arc<DescriptorSetLayout>, file_path: 
     Mesh {
         mesh_buffers,
         materials,
+        model_matrix: Matrix4::from_scale(1.0),
     }
 }
 
