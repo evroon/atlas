@@ -121,7 +121,7 @@ pub fn update_textures_egui(
                 preview_type_checkbox_item(
                     ui,
                     DebugPreviewBuffer::Normal,
-                    &mut params.preview_buffer, 
+                    &mut params.preview_buffer,
                 );
                 preview_type_checkbox_item(
                     ui,

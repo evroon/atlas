@@ -10,7 +10,7 @@ use atlas_core::{
     PerformanceInfo,
 };
 
-use std::time::Instant;
+use std::{path::Path, time::Instant};
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer, CpuBufferPool},
     command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, SubpassContents},
@@ -71,7 +71,11 @@ fn main() {
     let triangle_system = TriangleDrawSystem::new(&system.queue);
 
     let layout = deferred_pipeline.layout().set_layouts().get(1).unwrap();
-    let mesh = load_gltf(&system, layout);
+    let mesh = load_gltf(
+        &system,
+        layout,
+        Path::new("assets/models/sponza/sponza.glb"),
+    );
 
     system.event_loop.run(move |event, _, control_flow| {
         if input.update(&event) {

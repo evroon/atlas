@@ -8,6 +8,7 @@ use bytemuck::{Pod, Zeroable};
 use russimp::scene::{PostProcess, Scene};
 use russimp::texture::DataContent;
 use russimp::texture::TextureType;
+use std::path::Path;
 use std::sync::Arc;
 use vulkano::buffer::BufferUsage;
 use vulkano::buffer::TypedBufferAccess;
@@ -77,31 +78,40 @@ pub struct Mesh {
 }
 
 fn load_default_texture(system: &System) -> Texture {
-    load_png_file(&system.queue, "assets/models/sponza/textures/test.png")
+    load_png_file(
+        &system.queue,
+        "assets/models/sponza/16011208436118768083.png",
+    )
 }
 
 pub fn load_material(
     system: &System,
     layout: &Arc<DescriptorSetLayout>,
     assimp_material: &russimp::material::Material,
+    base_dir: &str,
 ) -> Material {
     let base_textures = assimp_material.textures.get(&TextureType::BaseColor);
 
     let result_tex = if base_textures.is_some() {
         let assimp_texture = &base_textures.unwrap().first().unwrap();
 
-        assert_eq!(
-            assimp_texture.ach_format_hint, "png",
-            "Encompassed texture data should be in png format"
-        );
+        let texture = if assimp_texture.path != "" {
+            let abs_tex_path = base_dir.to_owned() + assimp_texture.path.as_str();
+            load_png_file(&system.queue, &abs_tex_path)
+        } else {
+            assert_eq!(
+                assimp_texture.ach_format_hint, "png",
+                "Encompassed texture data should be in png format"
+            );
 
-        let texture = match assimp_texture
-            .data
-            .as_ref()
-            .expect("Unexpected texture data")
-        {
-            DataContent::Texel(_) => panic!("Loading textures by texels is not yet supported"),
-            DataContent::Bytes(bytes) => load_png(&system.queue, bytes),
+            match assimp_texture
+                .data
+                .as_ref()
+                .expect("Unexpected texture data")
+            {
+                DataContent::Texel(_) => panic!("Loading textures by texels is not yet supported"),
+                DataContent::Bytes(bytes) => load_png(&system.queue, bytes),
+            }
         };
 
         Some(texture)
@@ -119,9 +129,10 @@ pub fn load_material(
     }
 }
 
-pub fn load_gltf(system: &System, layout: &Arc<DescriptorSetLayout>) -> Mesh {
+pub fn load_gltf(system: &System, layout: &Arc<DescriptorSetLayout>, file_path: &Path) -> Mesh {
+    let base_dir = file_path.parent().unwrap().to_str().unwrap().to_owned() + "/";
     let scene = Scene::from_file(
-        "assets/models/sponza/sponza.glb",
+        file_path.to_str().unwrap(),
         vec![
             PostProcess::CalculateTangentSpace,
             PostProcess::Triangulate,
@@ -143,6 +154,7 @@ pub fn load_gltf(system: &System, layout: &Arc<DescriptorSetLayout>) -> Mesh {
             system,
             layout,
             scene.materials.get(mesh.material_index as usize).unwrap(),
+            &base_dir,
         );
 
         let vertices: Vec<Vertex> = assimp_vertices
