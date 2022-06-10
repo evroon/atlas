@@ -3,20 +3,25 @@ use std::sync::Arc;
 use vulkano::{
     device::Device,
     format::Format,
-    image::{view::ImageView, AttachmentImage, SwapchainImage},
+    image::{view::ImageView, AttachmentImage},
+    memory::pool::{PotentialDedicatedAllocation, StdMemoryPoolAlloc},
     pipeline::graphics::viewport::Viewport,
     render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass, Subpass},
 };
-use winit::window::Window;
+
+use crate::atlas_core::System;
 
 pub struct ShadowMapRenderPass {
     pub render_pass: Arc<RenderPass>,
     pub sub_pass: Subpass,
+    pub framebuffer: Arc<Framebuffer>,
+    pub shadow_map_buffer:
+        Arc<ImageView<AttachmentImage<PotentialDedicatedAllocation<StdMemoryPoolAlloc>>>>,
 }
 
-pub fn init_render_pass(device: &Arc<Device>) -> ShadowMapRenderPass {
+pub fn init_render_pass(system: &mut System) -> ShadowMapRenderPass {
     let render_pass = vulkano::ordered_passes_renderpass!(
-        device.clone(),
+        system.device.clone(),
         attachments: {
             depth: {
                 load: Clear,
@@ -37,9 +42,17 @@ pub fn init_render_pass(device: &Arc<Device>) -> ShadowMapRenderPass {
 
     let sub_pass = Subpass::from(render_pass.clone(), 0).unwrap();
 
+    let (framebuffer, shadow_map_buffer) = window_size_dependent_setup(
+        system.device.clone(),
+        render_pass.clone(),
+        &mut system.viewport,
+    );
+
     ShadowMapRenderPass {
         render_pass,
         sub_pass,
+        framebuffer,
+        shadow_map_buffer,
     }
 }
 

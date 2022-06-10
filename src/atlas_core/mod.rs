@@ -11,10 +11,9 @@ use vulkano::{
         Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo,
     },
     format::Format,
-    image::{view::ImageView, AttachmentImage, ImageAccess, ImageUsage, SwapchainImage},
+    image::{ImageUsage, SwapchainImage},
     instance::{Instance, InstanceCreateInfo},
     pipeline::graphics::viewport::Viewport,
-    render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass},
     swapchain::{Swapchain, SwapchainCreateInfo},
 };
 
@@ -25,17 +24,11 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
-use self::renderer::deferred::DeferredRenderPass;
-use self::renderer::shadow_map::ShadowMapRenderPass;
-
 pub mod camera;
 pub mod egui;
 pub mod mesh;
 pub mod renderer;
 pub mod texture;
-
-use renderer::deferred;
-use renderer::shadow_map;
 
 pub struct PerformanceInfo {
     pub game_start: Instant,
@@ -49,18 +42,15 @@ pub struct SystemInfo {
 
 pub struct System {
     pub info: SystemInfo,
-    pub event_loop: EventLoop<()>,
     pub device: Arc<Device>,
     pub swapchain: Arc<Swapchain<Window>>,
     pub images: Vec<Arc<SwapchainImage<Window>>>,
     pub surface: Arc<Surface<Window>>,
     pub queue: Arc<Queue>,
-    pub deferred_render_pass: DeferredRenderPass,
-    pub shadow_map_render_pass: ShadowMapRenderPass,
     pub viewport: Viewport,
 }
 
-pub fn init(title: &str) -> System {
+pub fn init(title: &str) -> (System, EventLoop<()>) {
     let required_extensions = vulkano_win::required_extensions();
     let instance = Instance::new(InstanceCreateInfo {
         enabled_extensions: required_extensions,
@@ -71,7 +61,7 @@ pub fn init(title: &str) -> System {
     let event_loop = EventLoop::new();
     let surface = WindowBuilder::new()
         .with_title(title)
-        .with_inner_size(LogicalSize::new(3000.0, 2000.0))
+        .with_inner_size(LogicalSize::new(3000.0_f32, 2000.0_f32))
         // .with_fullscreen(Some(Fullscreen::Borderless(None)))
         .build_vk_surface(&event_loop, instance.clone())
         .expect("Failed to create a window");
@@ -149,24 +139,21 @@ pub fn init(title: &str) -> System {
         depth_range: 0.0..1.0,
     };
 
-    let deferred_render_pass = deferred::init_render_pass(&device, &swapchain);
-    let shadow_map_render_pass = shadow_map::init_render_pass(&device);
-
-    System {
-        info: SystemInfo {
-            device_name: systtem_properties.device_name.clone(),
-            device_type: format!("{:?}", systtem_properties.device_type),
+    (
+        System {
+            info: SystemInfo {
+                device_name: systtem_properties.device_name.clone(),
+                device_type: format!("{:?}", systtem_properties.device_type),
+            },
+            device,
+            swapchain,
+            images,
+            surface,
+            queue,
+            viewport,
         },
         event_loop,
-        device,
-        swapchain,
-        images,
-        surface,
-        queue,
-        deferred_render_pass,
-        shadow_map_render_pass,
-        viewport,
-    }
+    )
 }
 
 pub fn acquire_image(

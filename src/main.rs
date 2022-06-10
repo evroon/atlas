@@ -5,13 +5,11 @@ use atlas_core::{
     egui::{get_egui_context, render_egui, update_textures_egui, FrameEndFuture},
     mesh::load_gltf,
     renderer::{
-        deferred::{self, deferred_vert_mod, get_lighting_uniform_buffer, prepare_deferred_pass},
+        deferred::{self, deferred_vert_mod, prepare_deferred_pass},
         shadow_map,
         triangle_draw_system::TriangleDrawSystem,
     },
-    start_builder,
-    texture::get_default_sampler,
-    PerformanceInfo,
+    start_builder, PerformanceInfo,
 };
 use cgmath::Matrix4;
 
@@ -19,7 +17,7 @@ use std::{path::Path, time::Instant};
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer, CpuBufferPool},
     command_buffer::SubpassContents,
-    descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet},
+    descriptor_set::PersistentDescriptorSet,
     pipeline::{Pipeline, PipelineBindPoint},
     swapchain::{SwapchainCreateInfo, SwapchainCreationError},
     sync::{FlushError, GpuFuture},
@@ -33,31 +31,21 @@ use winit_input_helper::WinitInputHelper;
 mod atlas_core;
 
 fn main() {
-    let mut system = atlas_core::init("Atlas Engine");
+    let (mut system, event_loop) = atlas_core::init("Atlas Engine");
+
+    let mut deferred_render_pass = deferred::init_render_pass(&mut system);
+    let shadow_map_render_pass = shadow_map::init_render_pass(&mut system);
+
     let uniform_buffer = CpuBufferPool::<deferred_vert_mod::ty::CameraData>::new(
         system.device.clone(),
         BufferUsage::all(),
-    );
-
-    let (mut framebuffers, mut color_buffer, mut normal_buffer, mut position_buffer) =
-        deferred::window_size_dependent_setup(
-            system.device.clone(),
-            &system.images,
-            system.deferred_render_pass.render_pass.clone(),
-            &mut system.viewport,
-        );
-
-    let (shadow_map_framebuffers, shadow_map_buffer) = shadow_map::window_size_dependent_setup(
-        system.device.clone(),
-        system.shadow_map_render_pass.render_pass.clone(),
-        &mut system.viewport,
     );
 
     let mut recreate_swapchain = false;
     let mut previous_frame_end = Some(FrameEndFuture::now(system.device.clone()));
 
     let (egui_ctx, mut egui_winit, mut egui_painter) =
-        get_egui_context(&system, &system.deferred_render_pass.render_pass);
+        get_egui_context(&system, &deferred_render_pass.render_pass);
 
     let mut camera = construct_camera();
     let mut input = WinitInputHelper::new();
@@ -70,12 +58,15 @@ fn main() {
         delta_time_ms: 0.0,
     };
 
-    let (deferred_pipeline, lighting_pipeline) =
-        deferred::init_pipelines(&system.device, &system.deferred_render_pass);
-
     let triangle_system = TriangleDrawSystem::new(&system.queue);
 
-    let layout = deferred_pipeline.layout().set_layouts().get(1).unwrap();
+    let layout = deferred_render_pass
+        .deferred_pipeline
+        .layout()
+        .set_layouts()
+        .get(1)
+        .unwrap();
+
     let mut mesh = load_gltf(
         &system,
         layout,
@@ -84,7 +75,7 @@ fn main() {
     // We need to turn the model upside-down.
     mesh.model_matrix = Matrix4::from_nonuniform_scale(1.0, -1.0, 1.0);
 
-    system.event_loop.run(move |event, _, control_flow| {
+    event_loop.run(move |event, _, control_flow| {
         if input.update(&event) {
             camera.handle_event(&input);
         }
@@ -132,14 +123,14 @@ fn main() {
                     ) = deferred::window_size_dependent_setup(
                         system.device.clone(),
                         &new_images,
-                        system.deferred_render_pass.render_pass.clone(),
+                        deferred_render_pass.render_pass.clone(),
                         &mut system.viewport,
                     );
 
-                    framebuffers = new_framebuffers;
-                    color_buffer = new_color_buffer;
-                    normal_buffer = new_normal_buffer;
-                    position_buffer = new_position_buffer;
+                    deferred_render_pass.deferred_framebuffers = new_framebuffers;
+                    deferred_render_pass.color_buffer = new_color_buffer;
+                    deferred_render_pass.normal_buffer = new_normal_buffer;
+                    deferred_render_pass.position_buffer = new_position_buffer;
                     recreate_swapchain = false;
                 }
 
@@ -180,25 +171,36 @@ fn main() {
                     &egui_ctx,
                     &mut egui_painter,
                     &mut egui_winit,
-                    &mut system.deferred_render_pass.params,
+                    &mut deferred_render_pass.params,
                 );
 
                 prepare_deferred_pass(
                     &mut builder,
-                    &framebuffers[image_num],
-                    &deferred_pipeline,
+                    &deferred_render_pass,
                     &system.viewport,
+                    image_num,
                 );
 
-                mesh.render(&mut builder, &deferred_pipeline, &deferred_set);
+                let (deferred_set, lighting_set) = deferred::get_layouts(
+                    &system,
+                    &deferred_render_pass,
+                    &shadow_map_render_pass,
+                    uniform_buffer_subbuffer,
+                );
+
+                mesh.render(
+                    &mut builder,
+                    &deferred_render_pass.deferred_pipeline,
+                    &deferred_set,
+                );
 
                 builder
                     .next_subpass(SubpassContents::Inline)
                     .unwrap()
-                    .bind_pipeline_graphics(lighting_pipeline.clone())
+                    .bind_pipeline_graphics(deferred_render_pass.lighting_pipeline.clone())
                     .bind_descriptor_sets(
                         PipelineBindPoint::Graphics,
-                        lighting_pipeline.layout().clone(),
+                        deferred_render_pass.lighting_pipeline.layout().clone(),
                         0,
                         lighting_set.clone(),
                     )
