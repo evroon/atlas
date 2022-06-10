@@ -20,6 +20,7 @@ use vulkano::{
         GraphicsPipeline, Pipeline,
     },
     render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass, Subpass},
+    swapchain::{SwapchainCreateInfo, SwapchainCreationError},
 };
 
 use winit::window::Window;
@@ -321,6 +322,39 @@ pub fn prepare_deferred_pass(
         .unwrap()
         .set_viewport(0, [viewport.clone()])
         .bind_pipeline_graphics(deferred_render_pass.deferred_pipeline.clone());
+}
+
+pub fn handle_recreate_swapchain(
+    system: &mut System,
+    deferred_render_pass: &mut DeferredRenderPass,
+    recreate_swapchain: &mut bool,
+) {
+    if *recreate_swapchain {
+        let (new_swapchain, new_images) = match system.swapchain.recreate(SwapchainCreateInfo {
+            image_extent: system.surface.window().inner_size().into(),
+            ..system.swapchain.create_info()
+        }) {
+            Ok(r) => r,
+            Err(SwapchainCreationError::ImageExtentNotSupported { .. }) => return,
+            Err(e) => panic!("Failed to recreate swapchain: {:?}", e),
+        };
+
+        system.swapchain = new_swapchain;
+        let (new_framebuffers, new_color_buffer, new_normal_buffer, new_position_buffer) =
+            window_size_dependent_setup(
+                system.device.clone(),
+                &new_images,
+                deferred_render_pass.render_pass.clone(),
+                &mut system.viewport,
+            );
+
+        deferred_render_pass.deferred_framebuffers = new_framebuffers;
+        deferred_render_pass.color_buffer = new_color_buffer;
+        deferred_render_pass.normal_buffer = new_normal_buffer;
+        deferred_render_pass.position_buffer = new_position_buffer;
+
+        *recreate_swapchain = false;
+    }
 }
 
 pub mod deferred_vert_mod {

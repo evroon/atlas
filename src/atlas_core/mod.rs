@@ -1,10 +1,13 @@
 use std::sync::Arc;
 use std::time::Instant;
 use vulkano::command_buffer::{
-    AutoCommandBufferBuilder, CommandBufferUsage, PrimaryAutoCommandBuffer,
+    AutoCommandBufferBuilder, CommandBufferExecFuture, CommandBufferUsage, PrimaryAutoCommandBuffer,
 };
 use vulkano::device::Features;
-use vulkano::swapchain::{acquire_next_image, AcquireError, Surface, SwapchainAcquireFuture};
+use vulkano::swapchain::{
+    acquire_next_image, AcquireError, PresentFuture, Surface, SwapchainAcquireFuture,
+};
+use vulkano::sync::{FlushError, GpuFuture, JoinFuture};
 use vulkano::{
     device::{
         physical::{PhysicalDevice, PhysicalDeviceType},
@@ -24,6 +27,8 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
+use self::egui::FrameEndFuture;
+
 pub mod camera;
 pub mod egui;
 pub mod mesh;
@@ -32,6 +37,7 @@ pub mod texture;
 
 pub struct PerformanceInfo {
     pub game_start: Instant,
+    pub last_update: Instant,
     pub delta_time_ms: f32,
 }
 
@@ -48,6 +54,17 @@ pub struct System {
     pub surface: Arc<Surface<Window>>,
     pub queue: Arc<Queue>,
     pub viewport: Viewport,
+    pub previous_frame_end: Option<
+        FrameEndFuture<
+            PresentFuture<
+                CommandBufferExecFuture<
+                    JoinFuture<Box<dyn GpuFuture>, SwapchainAcquireFuture<Window>>,
+                    PrimaryAutoCommandBuffer,
+                >,
+                Window,
+            >,
+        >,
+    >,
 }
 
 pub fn init(title: &str) -> (System, EventLoop<()>) {
@@ -138,6 +155,7 @@ pub fn init(title: &str) -> (System, EventLoop<()>) {
         dimensions: [0.0, 0.0],
         depth_range: 0.0..1.0,
     };
+    let previous_frame_end = Some(FrameEndFuture::now(device.clone()));
 
     (
         System {
@@ -151,6 +169,7 @@ pub fn init(title: &str) -> (System, EventLoop<()>) {
             surface,
             queue,
             viewport,
+            previous_frame_end,
         },
         event_loop,
     )
@@ -187,4 +206,39 @@ pub fn start_builder(
         CommandBufferUsage::OneTimeSubmit,
     )
     .unwrap()
+}
+
+impl System {
+    pub fn finish_frame(
+        &mut self,
+        command_buffer: PrimaryAutoCommandBuffer,
+        recreate_swapchain: &mut bool,
+        acquire_future: SwapchainAcquireFuture<Window>,
+        image_num: usize,
+    ) {
+        let future = self
+            .previous_frame_end
+            .take()
+            .unwrap()
+            .get()
+            .join(acquire_future)
+            .then_execute(self.queue.clone(), command_buffer)
+            .unwrap()
+            .then_swapchain_present(self.queue.clone(), self.swapchain.clone(), image_num)
+            .then_signal_fence_and_flush();
+
+        match future {
+            Ok(future) => {
+                self.previous_frame_end = Some(FrameEndFuture::FenceSignalFuture(future));
+            }
+            Err(FlushError::OutOfDate) => {
+                *recreate_swapchain = true;
+                self.previous_frame_end = Some(FrameEndFuture::now(self.device.clone()));
+            }
+            Err(e) => {
+                println!("Failed to flush future: {:?}", e);
+                self.previous_frame_end = Some(FrameEndFuture::now(self.device.clone()));
+            }
+        }
+    }
 }

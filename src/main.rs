@@ -19,8 +19,6 @@ use vulkano::{
     command_buffer::SubpassContents,
     descriptor_set::PersistentDescriptorSet,
     pipeline::{Pipeline, PipelineBindPoint},
-    swapchain::{SwapchainCreateInfo, SwapchainCreationError},
-    sync::{FlushError, GpuFuture},
 };
 use winit::{
     event::{Event, WindowEvent},
@@ -42,7 +40,6 @@ fn main() {
     );
 
     let mut recreate_swapchain = false;
-    let mut previous_frame_end = Some(FrameEndFuture::now(system.device.clone()));
 
     let (egui_ctx, mut egui_winit, mut egui_painter) =
         get_egui_context(&system, &deferred_render_pass.render_pass);
@@ -50,11 +47,9 @@ fn main() {
     let mut camera = construct_camera();
     let mut input = WinitInputHelper::new();
 
-    let game_start = Instant::now();
-    let mut last_update = Instant::now();
-
     let mut performance_info = PerformanceInfo {
-        game_start,
+        game_start: Instant::now(),
+        last_update: Instant::now(),
         delta_time_ms: 0.0,
     };
 
@@ -97,62 +92,25 @@ fn main() {
                 egui_winit.on_event(&egui_ctx, &event);
             }
             Event::RedrawEventsCleared => {
-                previous_frame_end
+                system
+                    .previous_frame_end
                     .as_mut()
                     .unwrap()
                     .as_mut()
                     .cleanup_finished();
 
-                if recreate_swapchain {
-                    let (new_swapchain, new_images) =
-                        match system.swapchain.recreate(SwapchainCreateInfo {
-                            image_extent: system.surface.window().inner_size().into(),
-                            ..system.swapchain.create_info()
-                        }) {
-                            Ok(r) => r,
-                            Err(SwapchainCreationError::ImageExtentNotSupported { .. }) => return,
-                            Err(e) => panic!("Failed to recreate swapchain: {:?}", e),
-                        };
+                deferred::handle_recreate_swapchain(
+                    &mut system,
+                    &mut deferred_render_pass,
+                    &mut recreate_swapchain,
+                );
 
-                    system.swapchain = new_swapchain;
-                    let (
-                        new_framebuffers,
-                        new_color_buffer,
-                        new_normal_buffer,
-                        new_position_buffer,
-                    ) = deferred::window_size_dependent_setup(
-                        system.device.clone(),
-                        &new_images,
-                        deferred_render_pass.render_pass.clone(),
-                        &mut system.viewport,
-                    );
+                performance_info.delta_time_ms =
+                    (Instant::now() - performance_info.last_update).as_secs_f32() * 1000.0;
+                performance_info.last_update = Instant::now();
 
-                    deferred_render_pass.deferred_framebuffers = new_framebuffers;
-                    deferred_render_pass.color_buffer = new_color_buffer;
-                    deferred_render_pass.normal_buffer = new_normal_buffer;
-                    deferred_render_pass.position_buffer = new_position_buffer;
-                    recreate_swapchain = false;
-                }
-
-                let uniform_buffer_subbuffer = {
-                    performance_info.delta_time_ms =
-                        (Instant::now() - last_update).as_secs_f32() * 1000.0;
-                    last_update = Instant::now();
-
-                    let extent = system.swapchain.image_extent();
-                    camera.aspect_ratio = extent[0] as f32 / extent[1] as f32;
-                    camera.world = mesh.model_matrix.into();
-                    camera.update();
-
-                    let uniform_data = deferred_vert_mod::ty::CameraData {
-                        world_view: camera.world_view.into(),
-                        world: camera.world.into(),
-                        view: camera.view.into(),
-                        proj: camera.proj.into(),
-                    };
-
-                    uniform_buffer.next(uniform_data).unwrap()
-                };
+                let uniform_buffer_subbuffer =
+                    camera.get_uniform_buffer(&system, &uniform_buffer, mesh.model_matrix);
 
                 let image_update_result = acquire_image(&system.swapchain, &mut recreate_swapchain);
                 if image_update_result.is_err() {
@@ -221,38 +179,19 @@ fn main() {
                 let command_buffer = builder.build().unwrap();
 
                 if wait_for_last_frame {
-                    if let Some(FrameEndFuture::FenceSignalFuture(ref mut f)) = previous_frame_end {
+                    if let Some(FrameEndFuture::FenceSignalFuture(ref mut f)) =
+                        system.previous_frame_end
+                    {
                         f.wait(None).unwrap();
                     }
                 }
 
-                let future = previous_frame_end
-                    .take()
-                    .unwrap()
-                    .get()
-                    .join(acquire_future)
-                    .then_execute(system.queue.clone(), command_buffer)
-                    .unwrap()
-                    .then_swapchain_present(
-                        system.queue.clone(),
-                        system.swapchain.clone(),
-                        image_num,
-                    )
-                    .then_signal_fence_and_flush();
-
-                match future {
-                    Ok(future) => {
-                        previous_frame_end = Some(FrameEndFuture::FenceSignalFuture(future));
-                    }
-                    Err(FlushError::OutOfDate) => {
-                        recreate_swapchain = true;
-                        previous_frame_end = Some(FrameEndFuture::now(system.device.clone()));
-                    }
-                    Err(e) => {
-                        println!("Failed to flush future: {:?}", e);
-                        previous_frame_end = Some(FrameEndFuture::now(system.device.clone()));
-                    }
-                }
+                system.finish_frame(
+                    command_buffer,
+                    &mut recreate_swapchain,
+                    acquire_future,
+                    image_num,
+                )
             }
             _ => (),
         }
