@@ -17,7 +17,7 @@ use vulkano::{
             vertex_input::BuffersDefinition,
             viewport::{Viewport, ViewportState},
         },
-        GraphicsPipeline, Pipeline,
+        GraphicsPipeline, Pipeline, PipelineBindPoint,
     },
     render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass, Subpass},
     swapchain::{SwapchainCreateInfo, SwapchainCreationError},
@@ -33,7 +33,7 @@ use crate::atlas_core::{
 
 use self::{deferred_vert_mod::ty::CameraData, lighting_frag_mod::ty::LightingData};
 
-use super::shadow_map::ShadowMapRenderPass;
+use super::{shadow_map::ShadowMapRenderPass, triangle_draw_system::TriangleDrawSystem};
 
 #[derive(PartialEq, Clone, Copy)]
 pub enum DebugPreviewBuffer {
@@ -299,61 +299,80 @@ pub fn get_layouts(
     (deferred_set, lighting_set)
 }
 
-pub fn prepare_deferred_pass(
-    builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
-    deferred_render_pass: &DeferredRenderPass,
-    viewport: &Viewport,
-    image_num: usize,
-) {
-    let clear_values = vec![
-        [0.0, 0.0, 0.0, 1.0].into(),
-        [0.0, 0.0, 0.0, 1.0].into(),
-        [0.0, 0.0, 0.0, 1.0].into(),
-        [0.0, 0.0, 0.0, 1.0].into(),
-        1f32.into(),
-    ];
+impl DeferredRenderPass {
+    pub fn prepare_deferred_pass(
+        &mut self,
+        builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
+        viewport: &Viewport,
+        image_num: usize,
+    ) {
+        let clear_values = vec![
+            [0.0, 0.0, 0.0, 1.0].into(),
+            [0.0, 0.0, 0.0, 1.0].into(),
+            [0.0, 0.0, 0.0, 1.0].into(),
+            [0.0, 0.0, 0.0, 1.0].into(),
+            1f32.into(),
+        ];
 
-    builder
-        .begin_render_pass(
-            deferred_render_pass.deferred_framebuffers[image_num].clone(),
-            SubpassContents::Inline,
-            clear_values,
-        )
-        .unwrap()
-        .set_viewport(0, [viewport.clone()])
-        .bind_pipeline_graphics(deferred_render_pass.deferred_pipeline.clone());
-}
+        builder
+            .begin_render_pass(
+                self.deferred_framebuffers[image_num].clone(),
+                SubpassContents::Inline,
+                clear_values,
+            )
+            .unwrap()
+            .set_viewport(0, [viewport.clone()])
+            .bind_pipeline_graphics(self.deferred_pipeline.clone());
+    }
 
-pub fn handle_recreate_swapchain(
-    system: &mut System,
-    deferred_render_pass: &mut DeferredRenderPass,
-    recreate_swapchain: &mut bool,
-) {
-    if *recreate_swapchain {
-        let (new_swapchain, new_images) = match system.swapchain.recreate(SwapchainCreateInfo {
-            image_extent: system.surface.window().inner_size().into(),
-            ..system.swapchain.create_info()
-        }) {
-            Ok(r) => r,
-            Err(SwapchainCreationError::ImageExtentNotSupported { .. }) => return,
-            Err(e) => panic!("Failed to recreate swapchain: {:?}", e),
-        };
+    pub fn prepare_lighting_subpass(
+        &mut self,
+        builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
+        lighting_set: Arc<PersistentDescriptorSet>,
+        triangle_system: &TriangleDrawSystem,
+    ) {
+        builder
+            .next_subpass(SubpassContents::Inline)
+            .unwrap()
+            .bind_pipeline_graphics(self.lighting_pipeline.clone())
+            .bind_descriptor_sets(
+                PipelineBindPoint::Graphics,
+                self.lighting_pipeline.layout().clone(),
+                0,
+                lighting_set.clone(),
+            )
+            .bind_vertex_buffers(0, triangle_system.vertex_buffer.clone())
+            .draw(6, 1, 0, 0)
+            .unwrap();
+    }
 
-        system.swapchain = new_swapchain;
-        let (new_framebuffers, new_color_buffer, new_normal_buffer, new_position_buffer) =
-            window_size_dependent_setup(
-                system.device.clone(),
-                &new_images,
-                deferred_render_pass.render_pass.clone(),
-                &mut system.viewport,
-            );
+    pub fn handle_recreate_swapchain(&mut self, system: &mut System) {
+        if system.recreate_swapchain {
+            let (new_swapchain, new_images) = match system.swapchain.recreate(SwapchainCreateInfo {
+                image_extent: system.surface.window().inner_size().into(),
+                ..system.swapchain.create_info()
+            }) {
+                Ok(r) => r,
+                Err(SwapchainCreationError::ImageExtentNotSupported { .. }) => return,
+                Err(e) => panic!("Failed to recreate swapchain: {:?}", e),
+            };
 
-        deferred_render_pass.deferred_framebuffers = new_framebuffers;
-        deferred_render_pass.color_buffer = new_color_buffer;
-        deferred_render_pass.normal_buffer = new_normal_buffer;
-        deferred_render_pass.position_buffer = new_position_buffer;
+            system.swapchain = new_swapchain;
+            let (new_framebuffers, new_color_buffer, new_normal_buffer, new_position_buffer) =
+                window_size_dependent_setup(
+                    system.device.clone(),
+                    &new_images,
+                    self.render_pass.clone(),
+                    &mut system.viewport,
+                );
 
-        *recreate_swapchain = false;
+            self.deferred_framebuffers = new_framebuffers;
+            self.color_buffer = new_color_buffer;
+            self.normal_buffer = new_normal_buffer;
+            self.position_buffer = new_position_buffer;
+
+            system.recreate_swapchain = false;
+        }
     }
 }
 

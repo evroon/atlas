@@ -41,6 +41,13 @@ pub struct PerformanceInfo {
     pub delta_time_ms: f32,
 }
 
+impl PerformanceInfo {
+    pub fn update(&mut self) {
+        self.delta_time_ms = (Instant::now() - self.last_update).as_secs_f32() * 1000.0;
+        self.last_update = Instant::now();
+    }
+}
+
 pub struct SystemInfo {
     pub device_name: String,
     pub device_type: String,
@@ -65,6 +72,8 @@ pub struct System {
             >,
         >,
     >,
+    pub performance_info: PerformanceInfo,
+    pub recreate_swapchain: bool,
 }
 
 pub fn init(title: &str) -> (System, EventLoop<()>) {
@@ -157,6 +166,12 @@ pub fn init(title: &str) -> (System, EventLoop<()>) {
     };
     let previous_frame_end = Some(FrameEndFuture::now(device.clone()));
 
+    let performance_info = PerformanceInfo {
+        game_start: Instant::now(),
+        last_update: Instant::now(),
+        delta_time_ms: 0.0,
+    };
+
     (
         System {
             info: SystemInfo {
@@ -170,6 +185,8 @@ pub fn init(title: &str) -> (System, EventLoop<()>) {
             queue,
             viewport,
             previous_frame_end,
+            performance_info,
+            recreate_swapchain: true,
         },
         event_loop,
     )
@@ -212,10 +229,16 @@ impl System {
     pub fn finish_frame(
         &mut self,
         command_buffer: PrimaryAutoCommandBuffer,
-        recreate_swapchain: &mut bool,
         acquire_future: SwapchainAcquireFuture<Window>,
         image_num: usize,
+        wait_for_last_frame: bool,
     ) {
+        if wait_for_last_frame {
+            if let Some(FrameEndFuture::FenceSignalFuture(ref mut f)) = self.previous_frame_end {
+                f.wait(None).unwrap();
+            }
+        }
+
         let future = self
             .previous_frame_end
             .take()
@@ -232,7 +255,7 @@ impl System {
                 self.previous_frame_end = Some(FrameEndFuture::FenceSignalFuture(future));
             }
             Err(FlushError::OutOfDate) => {
-                *recreate_swapchain = true;
+                self.recreate_swapchain = true;
                 self.previous_frame_end = Some(FrameEndFuture::now(self.device.clone()));
             }
             Err(e) => {
@@ -240,5 +263,13 @@ impl System {
                 self.previous_frame_end = Some(FrameEndFuture::now(self.device.clone()));
             }
         }
+    }
+
+    pub fn cleanup_finished(&mut self) {
+        self.previous_frame_end
+            .as_mut()
+            .unwrap()
+            .as_mut()
+            .cleanup_finished();
     }
 }
