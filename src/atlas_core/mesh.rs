@@ -97,7 +97,7 @@ pub fn load_material(
     let result_tex = if base_textures.is_some() {
         let assimp_texture = &base_textures.unwrap().first().unwrap();
 
-        let texture = if assimp_texture.path != "" {
+        let texture = if !assimp_texture.path.starts_with("*") {
             let abs_tex_path = base_dir.to_owned() + assimp_texture.path.as_str();
             load_png_file(&system.queue, &abs_tex_path)
         } else {

@@ -7,7 +7,6 @@ use atlas_core::{
     renderer::{
         deferred::{self, deferred_vert_mod},
         shadow_map,
-        triangle_draw_system::TriangleDrawSystem,
     },
     start_builder,
 };
@@ -17,7 +16,6 @@ use std::path::Path;
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer, CpuBufferPool},
     descriptor_set::PersistentDescriptorSet,
-    pipeline::Pipeline,
 };
 use winit::{
     event::{Event, WindowEvent},
@@ -43,14 +41,7 @@ fn main() {
     let mut camera = construct_camera();
     let mut input = WinitInputHelper::new();
 
-    let triangle_system = TriangleDrawSystem::new(&system.queue);
-
-    let layout = deferred_render_pass
-        .deferred_pipeline
-        .layout()
-        .set_layouts()
-        .get(1)
-        .unwrap();
+    let layout = deferred_render_pass.get_deferred_layout();
 
     let mut mesh = load_gltf(
         &system,
@@ -129,7 +120,7 @@ fn main() {
                 deferred_render_pass.prepare_lighting_subpass(
                     &mut builder,
                     lighting_set,
-                    &triangle_system,
+                    &system.triangle_system,
                 );
 
                 egui_data.render_egui(&mut builder, &system.surface, shapes);

@@ -4,7 +4,7 @@ use cgmath::Vector4;
 use vulkano::{
     buffer::{cpu_pool::CpuBufferPoolSubbuffer, BufferUsage, CpuBufferPool},
     command_buffer::{AutoCommandBufferBuilder, PrimaryAutoCommandBuffer, SubpassContents},
-    descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet},
+    descriptor_set::{layout::DescriptorSetLayout, PersistentDescriptorSet, WriteDescriptorSet},
     device::Device,
     format::Format,
     image::{view::ImageView, AttachmentImage, ImageAccess, SwapchainImage},
@@ -300,6 +300,14 @@ pub fn get_layouts(
 }
 
 impl DeferredRenderPass {
+    pub fn get_deferred_layout(&mut self) -> &Arc<DescriptorSetLayout> {
+        self.deferred_pipeline
+            .layout()
+            .set_layouts()
+            .get(1)
+            .unwrap()
+    }
+
     pub fn prepare_deferred_pass(
         &mut self,
         builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,

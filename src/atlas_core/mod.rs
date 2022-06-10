@@ -28,6 +28,7 @@ use winit::{
 };
 
 use self::egui::FrameEndFuture;
+use self::renderer::triangle_draw_system::TriangleDrawSystem;
 
 pub mod camera;
 pub mod egui;
@@ -74,6 +75,7 @@ pub struct System {
     >,
     pub performance_info: PerformanceInfo,
     pub recreate_swapchain: bool,
+    pub triangle_system: TriangleDrawSystem,
 }
 
 pub fn init(title: &str) -> (System, EventLoop<()>) {
@@ -171,6 +173,7 @@ pub fn init(title: &str) -> (System, EventLoop<()>) {
         last_update: Instant::now(),
         delta_time_ms: 0.0,
     };
+    let triangle_system = TriangleDrawSystem::new(&queue);
 
     (
         System {
@@ -187,6 +190,7 @@ pub fn init(title: &str) -> (System, EventLoop<()>) {
             previous_frame_end,
             performance_info,
             recreate_swapchain: true,
+            triangle_system,
         },
         event_loop,
     )
