@@ -9,7 +9,7 @@ use vulkano::{
     render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass, Subpass},
 };
 
-use crate::atlas_core::System;
+use crate::atlas_core::system::System;
 
 pub struct ShadowMapRenderPass {
     pub render_pass: Arc<RenderPass>,
@@ -42,7 +42,7 @@ pub fn init_render_pass(system: &mut System) -> ShadowMapRenderPass {
 
     let sub_pass = Subpass::from(render_pass.clone(), 0).unwrap();
 
-    let (framebuffer, shadow_map_buffer) = window_size_dependent_setup(
+    let (framebuffer, shadow_map_buffer) = image_setup(
         system.device.clone(),
         render_pass.clone(),
         &mut system.viewport,
@@ -56,7 +56,7 @@ pub fn init_render_pass(system: &mut System) -> ShadowMapRenderPass {
     }
 }
 
-pub fn window_size_dependent_setup(
+pub fn image_setup(
     device: Arc<Device>,
     render_pass: Arc<RenderPass>,
     viewport: &mut Viewport,

@@ -9,7 +9,7 @@ use winit::event::VirtualKeyCode;
 
 use super::{
     renderer::deferred::deferred_vert_mod::{self, ty::CameraData},
-    System,
+    system::System,
 };
 
 const MOUSE_BUTTON_LEFT: usize = 0;

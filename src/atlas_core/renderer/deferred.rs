@@ -27,8 +27,8 @@ use winit::window::Window;
 
 use crate::atlas_core::{
     mesh::{Normal, TexCoord, Vertex, Vertex2D},
+    system::System,
     texture::get_default_sampler,
-    System,
 };
 
 use self::{deferred_vert_mod::ty::CameraData, lighting_frag_mod::ty::LightingData};
@@ -68,6 +68,7 @@ pub struct DeferredRenderPass {
     pub params: RendererParams,
 
     pub deferred_framebuffers: Vec<Arc<Framebuffer>>,
+    pub image_num: usize,
 
     pub deferred_pipeline: Arc<GraphicsPipeline>,
     pub lighting_pipeline: Arc<GraphicsPipeline>,
@@ -203,6 +204,7 @@ pub fn init_render_pass(system: &mut System) -> DeferredRenderPass {
         lighting_pass,
         deferred_pipeline,
         lighting_pipeline,
+        image_num: 0,
         params: get_default_params(),
     }
 }
@@ -312,7 +314,6 @@ impl DeferredRenderPass {
         &mut self,
         builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
         viewport: &Viewport,
-        image_num: usize,
     ) {
         let clear_values = vec![
             [0.0, 0.0, 0.0, 1.0].into(),
@@ -324,7 +325,7 @@ impl DeferredRenderPass {
 
         builder
             .begin_render_pass(
-                self.deferred_framebuffers[image_num].clone(),
+                self.deferred_framebuffers[self.image_num].clone(),
                 SubpassContents::Inline,
                 clear_values,
             )

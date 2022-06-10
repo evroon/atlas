@@ -1,6 +1,5 @@
 use crate::atlas_core::camera::CameraInputLogic;
 use atlas_core::{
-    acquire_image,
     camera::construct_camera,
     egui::get_egui_context,
     mesh::load_gltf,
@@ -8,7 +7,7 @@ use atlas_core::{
         deferred::{self, deferred_vert_mod},
         shadow_map,
     },
-    start_builder,
+    system,
 };
 use cgmath::Matrix4;
 
@@ -26,8 +25,7 @@ use winit_input_helper::WinitInputHelper;
 mod atlas_core;
 
 fn main() {
-    let (mut system, event_loop) = atlas_core::init("Atlas Engine");
-
+    let (mut system, event_loop) = system::init("Atlas Engine");
     let mut deferred_render_pass = deferred::init_render_pass(&mut system);
     let shadow_map_render_pass = shadow_map::init_render_pass(&mut system);
 
@@ -37,17 +35,13 @@ fn main() {
     );
 
     let mut egui_data = get_egui_context(&system, &deferred_render_pass.render_pass);
-
     let mut camera = construct_camera();
     let mut input = WinitInputHelper::new();
 
     let layout = deferred_render_pass.get_deferred_layout();
 
-    let mut mesh = load_gltf(
-        &system,
-        layout,
-        Path::new("assets/models/sponza/sponza.glb"),
-    );
+    let mesh_path = Path::new("assets/models/sponza/sponza.glb");
+    let mut mesh = load_gltf(&system, layout, mesh_path);
     // We need to turn the model upside-down.
     mesh.model_matrix = Matrix4::from_nonuniform_scale(1.0, -1.0, 1.0);
 
@@ -82,15 +76,15 @@ fn main() {
                 let uniform_buffer_subbuffer =
                     camera.get_uniform_buffer(&system, &uniform_buffer, mesh.model_matrix);
 
-                let image_update_result =
-                    acquire_image(&system.swapchain, &mut system.recreate_swapchain);
+                let image_update_result = system.acquire_image();
                 if image_update_result.is_err() {
                     return;
                 }
 
                 let (image_num, acquire_future) = image_update_result.unwrap();
+                deferred_render_pass.image_num = image_num;
 
-                let mut builder = start_builder(&system.device, &system.queue);
+                let mut builder = system.start_builder();
 
                 let (shapes, wait_for_last_frame) = egui_data.update_textures_egui(
                     &system,
@@ -98,11 +92,7 @@ fn main() {
                     &mut deferred_render_pass.params,
                 );
 
-                deferred_render_pass.prepare_deferred_pass(
-                    &mut builder,
-                    &system.viewport,
-                    image_num,
-                );
+                deferred_render_pass.prepare_deferred_pass(&mut builder, &system.viewport);
 
                 let (deferred_set, lighting_set) = deferred::get_layouts(
                     &system,

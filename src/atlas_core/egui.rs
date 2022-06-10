@@ -14,7 +14,7 @@ use winit::window::Window;
 
 use super::{
     renderer::deferred::{DebugPreviewBuffer, RendererParams},
-    System,
+    system::System,
 };
 
 pub enum FrameEndFuture<F: GpuFuture + 'static> {
@@ -117,6 +117,10 @@ impl EguiData {
             ui.label(format!(
                 "delta time: {:.2} ms",
                 system.performance_info.delta_time_ms
+            ));
+            ui.label(format!(
+                "render time: {:.2} ms",
+                system.performance_info.render_time_ms
             ));
 
             ui.label("Ambient light color");

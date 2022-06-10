@@ -1,7 +1,6 @@
 use crate::atlas_core::texture::get_descriptor_set;
 use crate::atlas_core::texture::load_png;
 use crate::atlas_core::texture::load_png_file;
-use crate::atlas_core::System;
 use crate::CpuAccessibleBuffer;
 use crate::PersistentDescriptorSet;
 use bytemuck::{Pod, Zeroable};
@@ -24,6 +23,8 @@ use vulkano::pipeline::GraphicsPipeline;
 use vulkano::pipeline::Pipeline;
 use vulkano::pipeline::PipelineBindPoint;
 use vulkano::sync::NowFuture;
+
+use super::system::System;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
