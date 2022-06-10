@@ -1,3 +1,6 @@
+use egui::plot::Plot;
+use egui::Ui;
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Instant;
 use vulkano::command_buffer::{
@@ -34,20 +37,52 @@ use super::renderer::triangle_draw_system::TriangleDrawSystem;
 pub struct PerformanceInfo {
     pub game_start: Instant,
     pub last_update: Instant,
-    pub delta_time_ms: f32,
+    pub delta_time_ms: f64,
 
     pub last_render: Instant,
-    pub render_time_ms: f32,
+    pub render_time_ms: f64,
+
+    pub delta_time_history: VecDeque<f64>,
+    pub render_time_history: VecDeque<f64>,
+
+    pub history_length: usize,
 }
 
 impl PerformanceInfo {
     pub fn update(&mut self) {
-        self.delta_time_ms = (Instant::now() - self.last_update).as_secs_f32() * 1000.0;
+        self.delta_time_ms = (Instant::now() - self.last_update).as_secs_f64() * 1000.0;
+        self.delta_time_history.push_back(self.delta_time_ms);
+
         self.last_update = Instant::now();
         self.last_render = Instant::now();
+
+        while self.delta_time_history.len() > self.history_length {
+            self.delta_time_history.pop_front();
+        }
     }
     pub fn handle_render_end(&mut self) {
-        self.render_time_ms = (Instant::now() - self.last_render).as_secs_f32() * 1000.0;
+        self.render_time_ms = (Instant::now() - self.last_render).as_secs_f64() * 1000.0;
+        self.render_time_history.push_back(self.render_time_ms);
+
+        while self.render_time_history.len() > self.history_length {
+            self.render_time_history.pop_front();
+        }
+    }
+
+    pub fn get_plot(&self, ui: &mut Ui) -> egui::Response {
+        use egui::plot::{Line, Value, Values};
+        let line = Line::new(Values::from_values_iter(
+            self.render_time_history
+                .iter()
+                .enumerate()
+                .map(|(x, y)| Value::new(x as f64, *y)),
+        ));
+        Plot::new("render time")
+            .height(128.0)
+            .include_y(0.0)
+            .include_y(2.0)
+            .show(ui, |plot_ui| plot_ui.line(line))
+            .response
     }
 }
 
@@ -174,6 +209,11 @@ pub fn init(title: &str) -> (System, EventLoop<()>) {
         game_start: Instant::now(),
         last_update: Instant::now(),
         delta_time_ms: 0.0,
+        last_render: Instant::now(),
+        render_time_ms: 0.0,
+        delta_time_history: VecDeque::new(),
+        render_time_history: VecDeque::new(),
+        history_length: 100,
     };
     let triangle_system = TriangleDrawSystem::new(&queue);
 
@@ -241,7 +281,7 @@ impl System {
             }
         }
 
-        let future = self
+        let present_future = self
             .previous_frame_end
             .take()
             .unwrap()
@@ -249,8 +289,11 @@ impl System {
             .join(acquire_future)
             .then_execute(self.queue.clone(), command_buffer)
             .unwrap()
-            .then_swapchain_present(self.queue.clone(), self.swapchain.clone(), image_num)
-            .then_signal_fence_and_flush();
+            .then_swapchain_present(self.queue.clone(), self.swapchain.clone(), image_num);
+
+        self.performance_info.handle_render_end();
+
+        let future = present_future.then_signal_fence_and_flush();
 
         match future {
             Ok(future) => {

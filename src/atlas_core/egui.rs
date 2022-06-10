@@ -156,6 +156,8 @@ impl EguiData {
                     );
                 });
             ui.end_row();
+
+            system.performance_info.get_plot(ui);
         });
 
         // Get the shapes from egui
