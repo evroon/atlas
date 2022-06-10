@@ -6,7 +6,8 @@ use vulkano::{
     command_buffer::{AutoCommandBufferBuilder, PrimaryAutoCommandBuffer, SubpassContents},
     device::Device,
     format::Format,
-    memory::pool::StdMemoryPool,
+    image::{view::ImageView, AttachmentImage, ImageAccess, SwapchainImage},
+    memory::pool::{StdMemoryPool, PotentialDedicatedAllocation, StdMemoryPoolAlloc},
     pipeline::{
         graphics::{
             color_blend::ColorBlendState,
@@ -17,13 +18,13 @@ use vulkano::{
         },
         GraphicsPipeline,
     },
-    render_pass::{Framebuffer, RenderPass, Subpass},
-    swapchain::Swapchain,
+    render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass, Subpass},
+    swapchain::Swapchain, descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet},
 };
 
 use winit::window::Window;
 
-use crate::atlas_core::mesh::{Normal, TexCoord, Vertex, Vertex2D};
+use crate::atlas_core::{mesh::{Normal, TexCoord, Vertex, Vertex2D}, texture::get_default_sampler};
 
 use self::lighting_frag_mod::ty::LightingData;
 
@@ -58,6 +59,11 @@ pub struct DeferredRenderPass {
     pub deferred_pass: Subpass,
     pub lighting_pass: Subpass,
     pub params: RendererParams,
+
+    pub color_buffer: Arc<ImageView<AttachmentImage<PotentialDedicatedAllocation<StdMemoryPoolAlloc>>>>,
+    pub normal_buffer: Arc<ImageView<AttachmentImage<PotentialDedicatedAllocation<StdMemoryPoolAlloc>>>>,
+    pub position_buffer: Arc<ImageView<AttachmentImage<PotentialDedicatedAllocation<StdMemoryPoolAlloc>>>>,
+    pub shadow_map_buffer: Arc<ImageView<AttachmentImage<PotentialDedicatedAllocation<StdMemoryPoolAlloc>>>>,
 }
 
 pub fn get_default_params() -> RendererParams {
@@ -218,6 +224,42 @@ pub fn init_pipelines(
     (deferred_pipeline, lighting_pipeline)
 }
 
+pub fn get_layouts(deferred_pipeline: Arc<GraphicsPipeline>, lighting_pipeline: Arc<GraphicsPipeline>) -> (Arc<PersistentDescriptorSet>, Arc<PersistentDescriptorSet>) {
+    let deferred_layout = deferred_pipeline.layout().set_layouts().get(0).unwrap();
+    let deferred_set = PersistentDescriptorSet::new(
+        deferred_layout.clone(),
+        [WriteDescriptorSet::buffer(
+            0,
+            uniform_buffer_subbuffer.clone(),
+        )],
+    )
+    .unwrap();
+
+    let lighting_layout = lighting_pipeline.layout().set_layouts().get(0).unwrap();
+    let lighting_set = PersistentDescriptorSet::new(
+        lighting_layout.clone(),
+        [
+            WriteDescriptorSet::image_view(0, color_buffer.clone()),
+            WriteDescriptorSet::image_view(1, normal_buffer.clone()),
+            WriteDescriptorSet::image_view(2, position_buffer.clone()),
+            WriteDescriptorSet::image_view_sampler(
+                3,
+                shadow_map_buffer.clone(),
+                get_default_sampler(&system.device).clone(),
+            ),
+            WriteDescriptorSet::buffer(
+                10,
+                get_lighting_uniform_buffer(
+                    &system.device.clone(),
+                    &system.deferred_render_pass.params,
+                ),
+            ),
+        ],
+    )
+    .unwrap();
+    (deferred_set, lighting_set)
+}
+
 pub fn prepare_deferred_pass(
     builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
     framebuffer: &Arc<Framebuffer>,
@@ -281,4 +323,74 @@ mod lighting_frag_mod {
             #[derive(Clone, Copy, Zeroable, Pod)]
         },
     }
+}
+
+pub fn window_size_dependent_setup(
+    device: Arc<Device>,
+    images: &[Arc<SwapchainImage<Window>>],
+    render_pass: Arc<RenderPass>,
+    viewport: &mut Viewport,
+) -> (
+    Vec<Arc<Framebuffer>>,
+    Arc<ImageView<AttachmentImage>>,
+    Arc<ImageView<AttachmentImage>>,
+    Arc<ImageView<AttachmentImage>>,
+) {
+    let dimensions = images[0].dimensions().width_height();
+    viewport.dimensions = [dimensions[0] as f32, dimensions[1] as f32];
+
+    let depth_buffer = ImageView::new_default(
+        AttachmentImage::transient(device.clone(), dimensions, Format::D16_UNORM).unwrap(),
+    )
+    .unwrap();
+    let color_buffer = ImageView::new_default(
+        AttachmentImage::transient_input_attachment(
+            device.clone(),
+            dimensions,
+            Format::A2B10G10R10_UNORM_PACK32,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let normal_buffer = ImageView::new_default(
+        AttachmentImage::transient_input_attachment(
+            device.clone(),
+            dimensions,
+            Format::R16G16B16A16_SFLOAT,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let position_buffer = ImageView::new_default(
+        AttachmentImage::transient_input_attachment(
+            device.clone(),
+            dimensions,
+            Format::R16G16B16A16_SFLOAT,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    let framebuffers = images
+        .iter()
+        .map(|image| {
+            let view = ImageView::new_default(image.clone()).unwrap();
+            Framebuffer::new(
+                render_pass.clone(),
+                FramebufferCreateInfo {
+                    attachments: vec![
+                        view,
+                        color_buffer.clone(),
+                        normal_buffer.clone(),
+                        position_buffer.clone(),
+                        depth_buffer.clone(),
+                    ],
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+        })
+        .collect::<Vec<_>>();
+
+    (framebuffers, color_buffer, normal_buffer, position_buffer)
 }

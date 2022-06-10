@@ -6,6 +6,7 @@ use atlas_core::{
     mesh::load_gltf,
     renderer::{
         deferred::{self, deferred_vert_mod, get_lighting_uniform_buffer, prepare_deferred_pass},
+        shadow_map,
         triangle_draw_system::TriangleDrawSystem,
     },
     start_builder,
@@ -38,16 +39,17 @@ fn main() {
         BufferUsage::all(),
     );
 
-    let (
-        mut framebuffers,
-        mut color_buffer,
-        mut normal_buffer,
-        mut position_buffer,
-        mut shadow_map_buffer,
-    ) = atlas_core::window_size_dependent_setup(
+    let (mut framebuffers, mut color_buffer, mut normal_buffer, mut position_buffer) =
+        deferred::window_size_dependent_setup(
+            system.device.clone(),
+            &system.images,
+            system.deferred_render_pass.render_pass.clone(),
+            &mut system.viewport,
+        );
+
+    let (shadow_map_framebuffers, shadow_map_buffer) = shadow_map::window_size_dependent_setup(
         system.device.clone(),
-        &system.images,
-        system.deferred_render_pass.render_pass.clone(),
+        system.shadow_map_render_pass.render_pass.clone(),
         &mut system.viewport,
     );
 
@@ -127,8 +129,7 @@ fn main() {
                         new_color_buffer,
                         new_normal_buffer,
                         new_position_buffer,
-                        new_shadow_map_buffer,
-                    ) = atlas_core::window_size_dependent_setup(
+                    ) = deferred::window_size_dependent_setup(
                         system.device.clone(),
                         &new_images,
                         system.deferred_render_pass.render_pass.clone(),
@@ -139,7 +140,6 @@ fn main() {
                     color_buffer = new_color_buffer;
                     normal_buffer = new_normal_buffer;
                     position_buffer = new_position_buffer;
-                    shadow_map_buffer = new_shadow_map_buffer;
                     recreate_swapchain = false;
                 }
 
@@ -162,39 +162,6 @@ fn main() {
 
                     uniform_buffer.next(uniform_data).unwrap()
                 };
-
-                let deferred_layout = deferred_pipeline.layout().set_layouts().get(0).unwrap();
-                let deferred_set = PersistentDescriptorSet::new(
-                    deferred_layout.clone(),
-                    [WriteDescriptorSet::buffer(
-                        0,
-                        uniform_buffer_subbuffer.clone(),
-                    )],
-                )
-                .unwrap();
-
-                let lighting_layout = lighting_pipeline.layout().set_layouts().get(0).unwrap();
-                let lighting_set = PersistentDescriptorSet::new(
-                    lighting_layout.clone(),
-                    [
-                        WriteDescriptorSet::image_view(0, color_buffer.clone()),
-                        WriteDescriptorSet::image_view(1, normal_buffer.clone()),
-                        WriteDescriptorSet::image_view(2, position_buffer.clone()),
-                        WriteDescriptorSet::image_view_sampler(
-                            3,
-                            shadow_map_buffer.clone(),
-                            get_default_sampler(&system.device).clone(),
-                        ),
-                        WriteDescriptorSet::buffer(
-                            10,
-                            get_lighting_uniform_buffer(
-                                &system.device.clone(),
-                                &system.deferred_render_pass.params,
-                            ),
-                        ),
-                    ],
-                )
-                .unwrap();
 
                 let image_update_result = acquire_image(&system.swapchain, &mut recreate_swapchain);
                 if image_update_result.is_err() {
