@@ -41,6 +41,8 @@ pub enum DebugPreviewBuffer {
     Albedo = 1,
     Normal = 2,
     Position = 3,
+    Shadow = 4,
+    Depth = 5,
 }
 
 impl DebugPreviewBuffer {
@@ -50,6 +52,8 @@ impl DebugPreviewBuffer {
             DebugPreviewBuffer::Albedo => "Albedo",
             DebugPreviewBuffer::Normal => "Normal",
             DebugPreviewBuffer::Position => "Position",
+            DebugPreviewBuffer::Shadow => "Shadow",
+            DebugPreviewBuffer::Depth => "Depth",
         }
     }
 }
@@ -78,6 +82,8 @@ pub struct DeferredRenderPass {
     pub normal_buffer:
         Arc<ImageView<AttachmentImage<PotentialDedicatedAllocation<StdMemoryPoolAlloc>>>>,
     pub position_buffer:
+        Arc<ImageView<AttachmentImage<PotentialDedicatedAllocation<StdMemoryPoolAlloc>>>>,
+    pub depth_buffer:
         Arc<ImageView<AttachmentImage<PotentialDedicatedAllocation<StdMemoryPoolAlloc>>>>,
 }
 
@@ -173,7 +179,7 @@ pub fn init_render_pass(system: &mut System) -> DeferredRenderPass {
             {
                 color: [final_color],
                 depth_stencil: {},
-                input: [albedo, normals, positions] //, depth
+                input: [albedo, normals, positions, depth] //
             },
             // egui renderpass
             { color: [final_color], depth_stencil: {}, input: [] }
@@ -184,7 +190,7 @@ pub fn init_render_pass(system: &mut System) -> DeferredRenderPass {
     let deferred_pass = Subpass::from(render_pass.clone(), 0).unwrap();
     let lighting_pass = Subpass::from(render_pass.clone(), 1).unwrap();
 
-    let (deferred_framebuffers, color_buffer, normal_buffer, position_buffer) =
+    let (deferred_framebuffers, color_buffer, normal_buffer, position_buffer, depth_buffer) =
         window_size_dependent_setup(
             system.device.clone(),
             &system.images,
@@ -199,6 +205,7 @@ pub fn init_render_pass(system: &mut System) -> DeferredRenderPass {
         color_buffer,
         normal_buffer,
         position_buffer,
+        depth_buffer,
         render_pass,
         deferred_pass,
         lighting_pass,
@@ -286,8 +293,9 @@ pub fn get_layouts(
             WriteDescriptorSet::image_view(0, deferred_render_pass.color_buffer.clone()),
             WriteDescriptorSet::image_view(1, deferred_render_pass.normal_buffer.clone()),
             WriteDescriptorSet::image_view(2, deferred_render_pass.position_buffer.clone()),
+            WriteDescriptorSet::image_view(3, deferred_render_pass.depth_buffer.clone()),
             WriteDescriptorSet::image_view_sampler(
-                3,
+                4,
                 shadow_map_render_pass.shadow_map_buffer.clone(),
                 get_default_sampler(&system.device).clone(),
             ),
@@ -367,7 +375,7 @@ impl DeferredRenderPass {
             };
 
             system.swapchain = new_swapchain;
-            let (new_framebuffers, new_color_buffer, new_normal_buffer, new_position_buffer) =
+            let (new_framebuffers, new_color_buffer, new_normal_buffer, new_position_buffer, new_depth_buffer) =
                 window_size_dependent_setup(
                     system.device.clone(),
                     &new_images,
@@ -379,6 +387,7 @@ impl DeferredRenderPass {
             self.color_buffer = new_color_buffer;
             self.normal_buffer = new_normal_buffer;
             self.position_buffer = new_position_buffer;
+            self.depth_buffer = new_depth_buffer;
 
             system.recreate_swapchain = false;
         }
@@ -439,12 +448,13 @@ pub fn window_size_dependent_setup(
     Arc<ImageView<AttachmentImage>>,
     Arc<ImageView<AttachmentImage>>,
     Arc<ImageView<AttachmentImage>>,
+    Arc<ImageView<AttachmentImage>>,
 ) {
     let dimensions = images[0].dimensions().width_height();
     viewport.dimensions = [dimensions[0] as f32, dimensions[1] as f32];
 
     let depth_buffer = ImageView::new_default(
-        AttachmentImage::transient(device.clone(), dimensions, Format::D16_UNORM).unwrap(),
+        AttachmentImage::transient_input_attachment(device.clone(), dimensions, Format::D16_UNORM).unwrap(),
     )
     .unwrap();
     let color_buffer = ImageView::new_default(
@@ -496,5 +506,5 @@ pub fn window_size_dependent_setup(
         })
         .collect::<Vec<_>>();
 
-    (framebuffers, color_buffer, normal_buffer, position_buffer)
+    (framebuffers, color_buffer, normal_buffer, position_buffer, depth_buffer)
 }

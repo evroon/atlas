@@ -27,7 +27,7 @@ mod atlas_core;
 fn main() {
     let (mut system, event_loop) = system::init("Atlas Engine");
     let mut deferred_render_pass = deferred::init_render_pass(&mut system);
-    let shadow_map_render_pass = shadow_map::init_render_pass(&mut system);
+    let mut shadow_map_render_pass = shadow_map::init_render_pass(&mut system);
 
     let uniform_buffer = CpuBufferPool::<deferred_vert_mod::ty::CameraData>::new(
         system.device.clone(),
@@ -92,14 +92,24 @@ fn main() {
                     &mut deferred_render_pass.params,
                 );
 
-                deferred_render_pass.prepare_deferred_pass(&mut builder, &system.viewport);
-
                 let (deferred_set, lighting_set) = deferred::get_layouts(
                     &system,
                     &deferred_render_pass,
                     &shadow_map_render_pass,
                     uniform_buffer_subbuffer,
                 );
+
+                shadow_map_render_pass.prepare_shadow_map_pass(&mut builder, &system.viewport);
+
+                mesh.render(
+                    &mut builder,
+                    &deferred_render_pass.deferred_pipeline,
+                    &deferred_set,
+                );
+
+                builder.end_render_pass().unwrap();
+
+                deferred_render_pass.prepare_deferred_pass(&mut builder, &system.viewport);
 
                 mesh.render(
                     &mut builder,

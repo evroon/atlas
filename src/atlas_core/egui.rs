@@ -154,6 +154,16 @@ impl EguiData {
                         DebugPreviewBuffer::Position,
                         &mut params.preview_buffer,
                     );
+                    preview_type_checkbox_item(
+                        ui,
+                        DebugPreviewBuffer::Shadow,
+                        &mut params.preview_buffer,
+                    );
+                    preview_type_checkbox_item(
+                        ui,
+                        DebugPreviewBuffer::Depth,
+                        &mut params.preview_buffer,
+                    );
                 });
             ui.end_row();
 
