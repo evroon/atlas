@@ -1,8 +1,16 @@
 #![allow(dead_code)]
 
+use std::sync::Arc;
+
 use crate::WinitInputHelper;
 use cgmath::{InnerSpace, Matrix3, Matrix4, Point3, Rad, Vector3};
+use vulkano::{buffer::CpuBufferPool, memory::pool::StdMemoryPool};
 use winit::event::VirtualKeyCode;
+
+use super::{
+    renderer::deferred::deferred_vert_mod::{self, ty::CameraData},
+    system::System,
+};
 
 const MOUSE_BUTTON_LEFT: usize = 0;
 const MOUSE_BUTTON_RIGHT: usize = 1;
@@ -108,5 +116,29 @@ impl CameraInputLogic for Camera {
 
             self.right = self.forward.cross(self.up);
         }
+    }
+}
+
+impl Camera {
+    pub fn get_uniform_buffer(
+        &mut self,
+        system: &System,
+        uniform_buffer: &CpuBufferPool<CameraData, Arc<StdMemoryPool>>,
+        world: Matrix4<f32>,
+    ) -> Arc<vulkano::buffer::cpu_pool::CpuBufferPoolSubbuffer<CameraData, Arc<StdMemoryPool>>>
+    {
+        let extent = system.swapchain.image_extent();
+        self.aspect_ratio = extent[0] as f32 / extent[1] as f32;
+        self.world = world.into();
+        self.update();
+
+        let uniform_data = deferred_vert_mod::ty::CameraData {
+            world_view: self.world_view.into(),
+            world: self.world.into(),
+            view: self.view.into(),
+            proj: self.proj.into(),
+        };
+
+        uniform_buffer.next(uniform_data).unwrap()
     }
 }

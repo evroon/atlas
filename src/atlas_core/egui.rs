@@ -1,8 +1,7 @@
-use crate::atlas_core::SystemInfo;
 use std::sync::Arc;
 
-use egui::{epaint::ClippedShape, TextStyle, Ui};
-use egui_vulkano::UpdateTexturesResult;
+use egui::{epaint::ClippedShape, Context, TextStyle, Ui};
+use egui_vulkano::{Painter, UpdateTexturesResult};
 use egui_winit::State;
 use vulkano::{
     command_buffer::{AutoCommandBufferBuilder, PrimaryAutoCommandBuffer},
@@ -15,12 +14,18 @@ use winit::window::Window;
 
 use super::{
     renderer::deferred::{DebugPreviewBuffer, RendererParams},
-    PerformanceInfo, System,
+    system::System,
 };
 
 pub enum FrameEndFuture<F: GpuFuture + 'static> {
     FenceSignalFuture(FenceSignalFuture<F>),
     BoxedFuture(Box<dyn GpuFuture>),
+}
+
+pub struct EguiData {
+    pub egui_ctx: Context,
+    pub egui_winit: State,
+    pub egui_painter: Painter,
 }
 
 impl<F: GpuFuture> FrameEndFuture<F> {
@@ -45,10 +50,7 @@ impl<F: GpuFuture> AsMut<dyn GpuFuture> for FrameEndFuture<F> {
     }
 }
 
-pub fn get_egui_context(
-    system: &System,
-    render_pass: &Arc<RenderPass>,
-) -> (egui::Context, State, egui_vulkano::Painter) {
+pub fn get_egui_context(system: &System, render_pass: &Arc<RenderPass>) -> EguiData {
     let egui_ctx = egui::Context::default();
 
     // Increase text size
@@ -66,7 +68,11 @@ pub fn get_egui_context(
     )
     .expect("Could not create egui painter");
 
-    (egui_ctx, egui_winit, egui_painter)
+    EguiData {
+        egui_ctx,
+        egui_winit,
+        egui_painter,
+    }
 }
 
 fn preview_type_checkbox_item(
@@ -77,89 +83,108 @@ fn preview_type_checkbox_item(
     ui.selectable_value(value, item, item.get_text())
 }
 
-pub fn update_textures_egui(
-    performance_info: &PerformanceInfo,
-    system_info: &SystemInfo,
-    builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
-    surface: &Arc<Surface<Window>>,
-    egui_ctx: &egui::Context,
-    egui_painter: &mut egui_vulkano::Painter,
-    egui_winit: &mut State,
-    params: &mut RendererParams,
-) -> (Vec<ClippedShape>, bool) {
-    egui_ctx.begin_frame(egui_winit.take_egui_input(surface.window()));
+impl EguiData {
+    pub fn render_egui(
+        &mut self,
+        builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
+        surface: &Arc<Surface<Window>>,
+        shapes: Vec<ClippedShape>,
+    ) {
+        let size = surface.window().inner_size();
+        let sf: f32 = surface.window().scale_factor() as f32;
+        self.egui_painter
+            .draw(
+                builder,
+                [(size.width as f32) / sf, (size.height as f32) / sf],
+                &self.egui_ctx,
+                shapes,
+            )
+            .unwrap();
+    }
 
-    egui::Window::new("Monitoring").show(&egui_ctx, |ui| {
-        ui.label(system_info.device_name.clone());
-        ui.label(system_info.device_type.clone());
-        ui.label(format!(
-            "delta time: {:.2} ms",
-            performance_info.delta_time_ms
-        ));
+    pub fn update_textures_egui(
+        &mut self,
+        system: &System,
+        builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
+        params: &mut RendererParams,
+    ) -> (Vec<ClippedShape>, bool) {
+        self.egui_ctx
+            .begin_frame(self.egui_winit.take_egui_input(system.surface.window()));
 
-        ui.label("Ambient light color");
-        ui.color_edit_button_rgba_unmultiplied(&mut params.ambient_color);
-        ui.end_row();
+        egui::Window::new("Monitoring").show(&self.egui_ctx, |ui| {
+            ui.label(system.info.device_name.clone());
+            ui.label(system.info.device_type.clone());
+            ui.label(format!(
+                "delta time: {:.2} ms",
+                system.performance_info.delta_time_ms
+            ));
+            ui.label(format!(
+                "render time: {:.2} ms",
+                system.performance_info.render_time_ms
+            ));
 
-        ui.label("Directional light color");
-        ui.color_edit_button_rgba_unmultiplied(&mut params.directional_color);
-        ui.end_row();
+            ui.label("Ambient light color");
+            ui.color_edit_button_rgba_unmultiplied(&mut params.ambient_color);
+            ui.end_row();
 
-        egui::ComboBox::from_label("Preview")
-            .selected_text(params.preview_buffer.get_text())
-            .show_ui(ui, |ui| {
-                preview_type_checkbox_item(
-                    ui,
-                    DebugPreviewBuffer::FinalOutput,
-                    &mut params.preview_buffer,
-                );
-                preview_type_checkbox_item(
-                    ui,
-                    DebugPreviewBuffer::Albedo,
-                    &mut params.preview_buffer,
-                );
-                preview_type_checkbox_item(
-                    ui,
-                    DebugPreviewBuffer::Normal,
-                    &mut params.preview_buffer,
-                );
-                preview_type_checkbox_item(
-                    ui,
-                    DebugPreviewBuffer::Position,
-                    &mut params.preview_buffer,
-                );
-            });
-        ui.end_row();
-    });
+            ui.label("Directional light color");
+            ui.color_edit_button_rgba_unmultiplied(&mut params.directional_color);
+            ui.end_row();
 
-    // Get the shapes from egui
-    let egui_output = egui_ctx.end_frame();
-    let platform_output = egui_output.platform_output;
-    egui_winit.handle_platform_output(surface.window(), &egui_ctx, platform_output);
+            egui::ComboBox::from_label("Preview")
+                .selected_text(params.preview_buffer.get_text())
+                .show_ui(ui, |ui| {
+                    preview_type_checkbox_item(
+                        ui,
+                        DebugPreviewBuffer::FinalOutput,
+                        &mut params.preview_buffer,
+                    );
+                    preview_type_checkbox_item(
+                        ui,
+                        DebugPreviewBuffer::Albedo,
+                        &mut params.preview_buffer,
+                    );
+                    preview_type_checkbox_item(
+                        ui,
+                        DebugPreviewBuffer::Normal,
+                        &mut params.preview_buffer,
+                    );
+                    preview_type_checkbox_item(
+                        ui,
+                        DebugPreviewBuffer::Position,
+                        &mut params.preview_buffer,
+                    );
+                    preview_type_checkbox_item(
+                        ui,
+                        DebugPreviewBuffer::Shadow,
+                        &mut params.preview_buffer,
+                    );
+                    preview_type_checkbox_item(
+                        ui,
+                        DebugPreviewBuffer::Depth,
+                        &mut params.preview_buffer,
+                    );
+                });
+            ui.end_row();
 
-    let result = egui_painter
-        .update_textures(egui_output.textures_delta, builder)
-        .expect("egui texture error");
+            system.performance_info.get_plot(ui);
+        });
 
-    let wait_for_last_frame = result == UpdateTexturesResult::Changed;
-    (egui_output.shapes, wait_for_last_frame)
-}
+        // Get the shapes from egui
+        let egui_output = self.egui_ctx.end_frame();
+        let platform_output = egui_output.platform_output;
+        self.egui_winit.handle_platform_output(
+            system.surface.window(),
+            &self.egui_ctx,
+            platform_output,
+        );
 
-pub fn render_egui(
-    builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
-    surface: &Arc<Surface<Window>>,
-    egui_ctx: &egui::Context,
-    shapes: Vec<ClippedShape>,
-    egui_painter: &mut egui_vulkano::Painter,
-) {
-    let size = surface.window().inner_size();
-    let sf: f32 = surface.window().scale_factor() as f32;
-    egui_painter
-        .draw(
-            builder,
-            [(size.width as f32) / sf, (size.height as f32) / sf],
-            &egui_ctx,
-            shapes,
-        )
-        .unwrap();
+        let result = self
+            .egui_painter
+            .update_textures(egui_output.textures_delta, builder)
+            .expect("egui texture error");
+
+        let wait_for_last_frame = result == UpdateTexturesResult::Changed;
+        (egui_output.shapes, wait_for_last_frame)
+    }
 }
